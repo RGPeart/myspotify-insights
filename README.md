@@ -1,11 +1,8 @@
-# MySpotify Insights 🎵
+# MySpotify Insights
 
 A data engineering portfolio project featuring an end-to-end ETL pipeline and ML-powered music recommendation engine using Spotify data and Azure cloud services.
 
-![Architecture Diagram](docs/architecture_diagram.png)
-*Coming soon*
-
-## 🎯 Project Overview
+## Project Overview
 
 MySpotify Insights demonstrates production-grade data engineering practices by building a complete music recommendation system that:
 - Ingests personal Spotify listening history via API
@@ -14,74 +11,88 @@ MySpotify Insights demonstrates production-grade data engineering practices by b
 - Serves recommendations via a REST API
 - Visualizes insights through an interactive dashboard
 
-**Tech Stack:** Python | Azure | FastAPI | Scikit-learn | Streamlit | Airflow
+**Tech Stack:** Python | Azure Blob Storage | FastAPI | Scikit-learn | Streamlit | Prefect (optional)
 
-## 🚀 Features
+## Architecture
 
-- **Automated Data Pipeline**: Scheduled ingestion of Spotify data with error handling and data quality checks
-- **ML Recommendations**: Personalized track suggestions based on listening patterns and audio features
-- **REST API**: FastAPI service with OpenAPI documentation
-- **Analytics Dashboard**: Interactive visualizations of listening habits and recommendation performance
-- **Cloud Infrastructure**: Deployed on Azure with cost-optimized architecture
+The system follows a **medallion data lakehouse pattern** with data flowing one-way through each layer before being served by the API and dashboard.
 
-## 📊 Architecture
-Spotify API → Azure Functions → Blob Storage (Bronze)
-↓
-ETL Pipeline (Airflow)
-↓
-Transformed Data (Silver/Gold)
-↓
-ML Model Training & Serving (FastAPI)
-↓
-Dashboard (Streamlit)
+```
+Spotify API
+    │
+    ▼
+src/ingestion/spotify_client.py    →  data/bronze/   (raw JSON, manifest-tracked)
+    │
+    ▼
+src/etl/bronze_to_silver.py        →  data/silver/   (cleaned, normalized, validated Parquet)
+    │
+    ▼
+src/etl/silver_to_gold.py          →  data/gold/     (dimensional model, composite scores)
+    │
+    ├──► src/models/train.py        (collaborative + content-based recommendation model)
+    │         │
+    │         ▼
+    │    src/models/predict.py      (inference, called by API routes)
+    │
+    └──► src/api/routes.py          (FastAPI endpoints)
+              │
+              ▼
+         src/dashboard/app.py       (Streamlit analytics dashboard)
+```
 
-## 🛠️ Setup Instructions
+## Setup
 
 ### Prerequisites
-- Python 3.9+
-- Azure account (free tier)
-- Spotify Developer account
-- Git
+- Python 3.11+
+- Spotify Developer account (for API credentials)
+- Azure account (optional — for cloud storage)
 
 ### Installation
 
-1. **Clone the repository**
 ```bash
-   git clone https://github.com/YOUR_USERNAME/myspotify-insights.git
-   cd myspotify-insights
+# Clone and enter the repo
+git clone https://github.com/RGPeart/myspotify-insights.git
+cd myspotify-insights
+
+# Create virtual environment
+python -m venv venv
+.\venv\Scripts\activate        # Windows
+source venv/bin/activate       # macOS/Linux
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Configure credentials
+cp .env.example .env
+# Edit .env with your Spotify client ID/secret and (optionally) Azure connection string
 ```
 
-2. **Create virtual environment**
+### Running the pipeline
+
 ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+# 1. Ingest raw data from Spotify API → data/bronze/
+python -m src.ingestion.spotify_client
+
+# 2. Bronze → Silver (clean, normalize, validate)
+python -m src.etl.bronze_to_silver
+
+# 3. Silver → Gold (dimensional model, composite popularity scores)
+python -m src.etl.silver_to_gold
+
+# Or run the full pipeline in one step (with optional Prefect orchestration)
+python -m src.etl.pipeline
+
+# 4. Train recommendation model
+python -m src.models.train
+
+# 5. Start API server
+uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+
+# 6. Start dashboard
+streamlit run src/dashboard/app.py
 ```
 
-3. **Install dependencies**
-```bash
-   pip install -r requirements.txt
-```
-
-4. **Configure environment variables**
-```bash
-   cp .env.example .env
-   # Edit .env with your Spotify and Azure credentials
-```
-
-5. **Run the ingestion pipeline**
-```bash
-   python src/ingestion/spotify_client.py
-```
-
-*Detailed setup instructions in [docs/setup.md](docs/setup.md)*
-
-## 📖 Documentation
-
-- [Architecture Overview](docs/architecture.md)
-- [API Documentation](docs/api_docs.md)
-- [Setup Guide](docs/setup.md)
-
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run all tests
@@ -89,35 +100,38 @@ pytest
 
 # Run with coverage
 pytest --cov=src tests/
+
+# Run a single test
+pytest tests/test_etl.py::TestBronzeToSilverRun::test_run_end_to_end
 ```
 
-## 📈 Roadmap
+## Project Status
 
-- [x] Project setup and PRD
-- [ ] Spotify API integration
-- [ ] ETL pipeline (Bronze → Silver → Gold)
-- [ ] Recommendation model training
-- [ ] FastAPI deployment
-- [ ] Dashboard development
-- [ ] CI/CD with GitHub Actions
+| Feature | Status | Branch / PR |
+|---|---|---|
+| Project setup & PRD | Done | `main` |
+| Feature 1: Spotify API ingestion | Done | `main` |
+| Feature 2: ETL pipeline (Bronze → Silver → Gold) | In review | PR #9 |
+| Feature 3: Recommendation model | Planned | — |
+| Feature 4: FastAPI service | Planned | — |
+| Feature 5: Streamlit dashboard | Planned | — |
+| Feature 6: CI/CD & cloud deployment | Planned | — |
 
-## 📝 License
+## Branching Strategy
 
-MIT License - see [LICENSE](LICENSE) file for details
+```
+feature/* → release → main
+```
 
-## 👤 Author
+Feature branches are opened against `release`. Once reviewed and merged to `release`, a consolidated PR moves the changes into `main`.
+
+## Author
 
 **Ryan Peart**
-- Portfolio: [Porfolio Link](https://rgpeart.github.io/portfolio)
+- Portfolio: [rgpeart.github.io/portfolio](https://rgpeart.github.io/portfolio)
 - LinkedIn: [Ryan Peart](https://www.linkedin.com/in/ryan-peart/)
 - GitHub: [@RGPeart](https://github.com/RGPeart)
 
-## 🙏 Acknowledgments
+## License
 
-- Spotify Web API for data access
-- Azure for cloud infrastructure
-- Open source libraries used in this project
-
----
-
-⭐ Star this repo if you find it helpful!
+MIT License — see [LICENSE](LICENSE) for details.
