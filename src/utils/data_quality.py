@@ -57,12 +57,13 @@ def run_quality_checks(
     key_cols: list[str],
     expected_cols: list[str] | None = None,
 ) -> DataQualityReport:
+    schema_cols = list(dict.fromkeys((expected_cols or required_cols) + key_cols))
     report = DataQualityReport(
         table_name=table_name,
         row_count=len(df),
         null_counts=check_nulls(df, required_cols),
         duplicate_count=check_duplicates(df, key_cols),
-        schema_errors=check_schema(df, expected_cols or required_cols),
+        schema_errors=check_schema(df, schema_cols),
     )
     status = "PASSED" if report.passed else "FAILED"
     logger.info(

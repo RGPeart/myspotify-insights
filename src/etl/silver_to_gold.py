@@ -3,8 +3,9 @@ from pathlib import Path
 import pandas as pd
 import yaml
 
-from src.utils.data_quality import DataQualityReport, run_quality_checks
+from src.utils.data_quality import DataQualityError, DataQualityReport, assert_quality, run_quality_checks
 from src.utils.logging_config import get_logger
+from src.utils.parquet_io import write_parquet
 
 logger = get_logger(__name__)
 
@@ -42,7 +43,7 @@ def build_dim_tracks(tracks: pd.DataFrame, artists: pd.DataFrame | None) -> pd.D
         df = df.join(artist_lookup, on="primary_artist_id")
     else:
         df["primary_genre"] = "unknown"
-        df["artist_popularity"] = float("nan")
+        df["artist_popularity"] = None
 
     df["track_popularity"] = pd.to_numeric(df["popularity"], errors="coerce")
     df["composite_popularity"] = (
@@ -75,20 +76,12 @@ def build_fact_audio_features(
         track_keys = tracks[["track_id", "primary_artist_id", "album_id"]].drop_duplicates("track_id")
         df = df.merge(track_keys, on="track_id", how="left")
     else:
-        df["primary_artist_id"] = float("nan")
-        df["album_id"] = float("nan")
+        df["primary_artist_id"] = None
+        df["album_id"] = None
 
     key_cols = ["track_id", "primary_artist_id", "album_id"]
     feature_cols = [c for c in df.columns if c not in key_cols]
     return df[key_cols + feature_cols].reset_index(drop=True)
-
-
-def _write_parquet(df: pd.DataFrame, table_name: str, dest_dir: Path) -> Path:
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    out = dest_dir / f"{table_name}.parquet"
-    df.to_parquet(out, engine="pyarrow", index=False)
-    logger.info("Wrote %d rows -> %s", len(df), out)
-    return out
 
 
 def run(silver_dir: Path = SILVER_DIR, gold_dir: Path = GOLD_DIR) -> dict[str, DataQualityReport]:
@@ -105,32 +98,38 @@ def run(silver_dir: Path = SILVER_DIR, gold_dir: Path = GOLD_DIR) -> dict[str, D
 
     # dim_tracks
     dim_tracks = build_dim_tracks(tracks, artists)
-    reports["dim_tracks"] = run_quality_checks(
+    report = run_quality_checks(
         dim_tracks, "gold/dim_tracks",
         required_cols=["track_id", "name", "composite_popularity"],
         key_cols=["track_id"],
     )
-    _write_parquet(dim_tracks, "dim_tracks", gold_dir)
+    reports["dim_tracks"] = report
+    assert_quality(report)
+    write_parquet(dim_tracks, "dim_tracks", gold_dir)
 
     # dim_artists
     if artists is not None and not artists.empty:
         dim_artists = build_dim_artists(artists)
-        reports["dim_artists"] = run_quality_checks(
+        report = run_quality_checks(
             dim_artists, "gold/dim_artists",
             required_cols=["artist_id", "artist_name"],
             key_cols=["artist_id"],
         )
-        _write_parquet(dim_artists, "dim_artists", gold_dir)
+        reports["dim_artists"] = report
+        assert_quality(report)
+        write_parquet(dim_artists, "dim_artists", gold_dir)
 
     # fact_audio_features
     if audio_features is not None and not audio_features.empty:
         fact_af = build_fact_audio_features(audio_features, tracks)
-        reports["fact_audio_features"] = run_quality_checks(
+        report = run_quality_checks(
             fact_af, "gold/fact_audio_features",
             required_cols=["track_id", "danceability", "energy"],
             key_cols=["track_id"],
         )
-        _write_parquet(fact_af, "fact_audio_features", gold_dir)
+        reports["fact_audio_features"] = report
+        assert_quality(report)
+        write_parquet(fact_af, "fact_audio_features", gold_dir)
 
     return reports
 

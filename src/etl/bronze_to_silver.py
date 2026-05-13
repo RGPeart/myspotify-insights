@@ -5,8 +5,9 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.utils.data_quality import DataQualityReport, DataQualityError, run_quality_checks
+from src.utils.data_quality import DataQualityError, DataQualityReport, assert_quality, run_quality_checks
 from src.utils.logging_config import get_logger
+from src.utils.parquet_io import write_parquet
 
 logger = get_logger(__name__)
 
@@ -34,7 +35,7 @@ _GENRE_PATTERNS: list[tuple[str, list[str]]] = [
     ("classical",   ["classical", "orchestra", "symphony", "chamber", "opera", "baroque"]),
     ("latin",       ["latin", "reggaeton", "salsa", "cumbia", "bossa nova"]),
     ("folk",        ["folk", "singer-songwriter"]),
-    ("rock",        ["rock", "metal", "punk", "grunge", "indie", "alternative"]),
+    ("rock",        ["rock", "metal", "punk", "grunge", "indie rock", "alternative"]),
     ("pop",         ["pop"]),
 ]
 
@@ -76,6 +77,8 @@ def _load_bronze_files(data_type: str, bronze_dir: Path = BRONZE_DIR) -> list[di
             batch = json.load(f)
         if isinstance(batch, list):
             records.extend(batch)
+        else:
+            logger.warning("Skipping non-list JSON in %s", path)
     logger.info("Loaded %d raw %s records from %d file(s)", len(records), data_type, len(paths))
     return records
 
@@ -109,7 +112,8 @@ def transform_tracks(raw: list[dict]) -> pd.DataFrame:
 
 
 def transform_audio_features(raw: list[dict]) -> pd.DataFrame:
-    all_cols = list(_RANGE_FEATURES) + _UNIT_FEATURES + _BINARY_FEATURES + ["duration_ms", "time_signature"]
+    # time_signature is already in _RANGE_FEATURES so list(_RANGE_FEATURES) covers it
+    all_cols = list(_RANGE_FEATURES) + _UNIT_FEATURES + _BINARY_FEATURES + ["duration_ms"]
     rows = []
     for item in raw:
         if not item or not item.get("id"):
@@ -160,14 +164,6 @@ def transform_artists(raw: list[dict]) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def _write_parquet(df: pd.DataFrame, table_name: str, dest_dir: Path) -> Path:
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    out = dest_dir / f"{table_name}.parquet"
-    df.to_parquet(out, engine="pyarrow", index=False)
-    logger.info("Wrote %d rows -> %s", len(df), out)
-    return out
-
-
 def run(bronze_dir: Path = BRONZE_DIR, silver_dir: Path = SILVER_DIR) -> dict[str, DataQualityReport]:
     """Bronze → Silver: load, clean, normalize, validate, and persist as Parquet."""
     reports: dict[str, DataQualityReport] = {}
@@ -182,7 +178,8 @@ def run(bronze_dir: Path = BRONZE_DIR, silver_dir: Path = SILVER_DIR) -> dict[st
             key_cols=["track_id"],
         )
         reports["tracks"] = report
-        _write_parquet(df, "tracks", silver_dir)
+        assert_quality(report)
+        write_parquet(df, "tracks", silver_dir)
 
     # --- Audio features ---
     raw = _load_bronze_files("audio_features", bronze_dir)
@@ -194,7 +191,8 @@ def run(bronze_dir: Path = BRONZE_DIR, silver_dir: Path = SILVER_DIR) -> dict[st
             key_cols=["track_id"],
         )
         reports["audio_features"] = report
-        _write_parquet(df, "audio_features", silver_dir)
+        assert_quality(report)
+        write_parquet(df, "audio_features", silver_dir)
 
     # --- Artists ---
     raw = _load_bronze_files("artists", bronze_dir)
@@ -206,7 +204,8 @@ def run(bronze_dir: Path = BRONZE_DIR, silver_dir: Path = SILVER_DIR) -> dict[st
             key_cols=["artist_id"],
         )
         reports["artists"] = report
-        _write_parquet(df, "artists", silver_dir)
+        assert_quality(report)
+        write_parquet(df, "artists", silver_dir)
 
     return reports
 

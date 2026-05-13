@@ -171,7 +171,7 @@ class TestTransformTracks:
     def test_release_date_year_only(self):
         t = make_track(release_date="1985")
         df = transform_tracks([t])
-        # year-only dates coerce to NaT, not a crash
+        # year-only dates parse to Jan 1 of that year, not NaT
         assert len(df) == 1
 
     def test_release_date_full_date(self):
@@ -336,6 +336,27 @@ class TestBronzeToSilverRun:
         assert "audio_features" not in reports
         assert "artists" not in reports
 
+    def test_quality_failure_prevents_write(self, tmp_path, monkeypatch):
+        from src.etl import bronze_to_silver
+
+        bronze = tmp_path / "bronze"
+        silver = tmp_path / "silver"
+        (bronze / "tracks" / "2026-01-01").mkdir(parents=True)
+        (bronze / "tracks" / "2026-01-01" / "tracks.json").write_text(
+            json.dumps([make_track()])
+        )
+
+        failing_report = DataQualityReport(
+            table_name="silver/tracks", row_count=1,
+            null_counts={"track_id": 1}, duplicate_count=0, schema_errors=[],
+        )
+        monkeypatch.setattr(bronze_to_silver, "run_quality_checks", lambda *a, **kw: failing_report)
+
+        with pytest.raises(DataQualityError):
+            b2s_run(bronze_dir=bronze, silver_dir=silver)
+
+        assert not (silver / "tracks.parquet").exists()
+
 
 # ------------------------------------------------------------------ #
 # Silver → Gold                                                       #
@@ -484,6 +505,25 @@ class TestSilverToGoldRun:
         reports = s2g_run(silver_dir=silver, gold_dir=gold)
         assert "dim_tracks" in reports
         assert "dim_artists" not in reports
+
+    def test_quality_failure_prevents_write(self, tmp_path, monkeypatch):
+        from src.etl import silver_to_gold
+
+        silver = tmp_path / "silver"
+        gold = tmp_path / "gold"
+        silver.mkdir()
+        _make_silver_tracks().to_parquet(silver / "tracks.parquet", index=False)
+
+        failing_report = DataQualityReport(
+            table_name="gold/dim_tracks", row_count=2,
+            null_counts={"track_id": 1}, duplicate_count=0, schema_errors=[],
+        )
+        monkeypatch.setattr(silver_to_gold, "run_quality_checks", lambda *a, **kw: failing_report)
+
+        with pytest.raises(DataQualityError):
+            s2g_run(silver_dir=silver, gold_dir=gold)
+
+        assert not (gold / "dim_tracks.parquet").exists()
 
 
 # ------------------------------------------------------------------ #
