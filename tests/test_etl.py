@@ -440,7 +440,7 @@ class TestBuildDimTracks:
         dim = build_dim_tracks(_make_silver_tracks(), None)
         assert len(dim) == 2
         assert (dim["primary_genre"] == "unknown").all()
-        # composite uses only track_popularity * 0.6
+        # all artist_popularity are NaN → median is NaN → fill is 0; composite ≤ 0.6
         assert all(dim["composite_popularity"] <= 0.6)
 
     def test_unmatched_artist_still_present(self):

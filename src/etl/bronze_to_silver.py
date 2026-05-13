@@ -11,11 +11,9 @@ from src.utils.parquet_io import write_parquet
 
 logger = get_logger(__name__)
 
-_CONFIG = load_config()
-BRONZE_DIR = Path(_CONFIG.get("storage", {}).get("bronze_dir", "data/bronze"))
-SILVER_DIR = Path(_CONFIG.get("storage", {}).get("silver_dir", "data/silver"))
-
 # Sub-genre patterns → broad category.  Order matters: more specific first.
+# "pop" is intentionally a catch-all at the tail — any genre not matched
+# above that contains "pop" as a substring will land here.
 _GENRE_PATTERNS: list[tuple[str, list[str]]] = [
     ("hip-hop",     ["hip-hop", "hip hop", "rap", "trap", "drill", "grime"]),
     ("electronic",  ["electronic", "edm", "house", "techno", "electro", "dubstep", "trance", "synth"]),
@@ -55,7 +53,7 @@ def _categorize_genres(genres: list[str]) -> str:
     return "other"
 
 
-def _load_bronze_files(data_type: str, bronze_dir: Path = BRONZE_DIR) -> list[dict]:
+def _load_bronze_files(data_type: str, bronze_dir: Path) -> list[dict]:
     """Read and concatenate all JSON files for a data type from the bronze layer."""
     records: list[dict] = []
     paths = sorted(bronze_dir.glob(f"{data_type}/**/*.json"))
@@ -122,10 +120,17 @@ def transform_audio_features(raw: list[dict]) -> pd.DataFrame:
     df = df.dropna(subset=["track_id"])
     df = df.drop_duplicates(subset=["track_id"], keep="first")
 
-    # Normalize range-bound features
+    # Normalize range-bound features; warn when values fall outside the defined bounds
     for col, (lo, hi) in _RANGE_FEATURES.items():
-        if col in df.columns:
-            df[col] = ((df[col] - lo) / (hi - lo)).clip(0, 1)
+        if col not in df.columns:
+            continue
+        out_of_range = df[col].notna() & ((df[col] < lo) | (df[col] > hi))
+        if out_of_range.any():
+            logger.warning(
+                "%d %s value(s) outside expected range [%s, %s] — will be clipped",
+                out_of_range.sum(), col, lo, hi,
+            )
+        df[col] = ((df[col] - lo) / (hi - lo)).clip(0, 1)
 
     # Clip unit features to [0, 1] as a safety net
     for col in _UNIT_FEATURES:
@@ -158,8 +163,12 @@ def transform_artists(raw: list[dict]) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-def run(bronze_dir: Path = BRONZE_DIR, silver_dir: Path = SILVER_DIR) -> dict[str, DataQualityReport]:
+def run(bronze_dir: Path | None = None, silver_dir: Path | None = None) -> dict[str, DataQualityReport]:
     """Bronze → Silver: load, clean, normalize, validate, and persist as Parquet."""
+    cfg = load_config()
+    bronze_dir = bronze_dir or Path(cfg.get("storage", {}).get("bronze_dir", "data/bronze"))
+    silver_dir = silver_dir or Path(cfg.get("storage", {}).get("silver_dir", "data/silver"))
+
     reports: dict[str, DataQualityReport] = {}
 
     # --- Tracks ---

@@ -39,7 +39,11 @@ class DataQualityReport:
 
 
 def check_nulls(df: pd.DataFrame, required_cols: list[str]) -> dict[str, int]:
-    """Return {col: null_count} for required columns that contain nulls."""
+    """Return {col: null_count} for required columns that contain nulls.
+
+    Columns in required_cols that are absent from df are silently skipped —
+    use check_schema separately to detect missing columns.
+    """
     result = {}
     for col in required_cols:
         if col in df.columns:

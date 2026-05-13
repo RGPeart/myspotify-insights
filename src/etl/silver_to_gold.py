@@ -9,12 +9,8 @@ from src.utils.parquet_io import write_parquet
 
 logger = get_logger(__name__)
 
-_CONFIG = load_config()
-SILVER_DIR = Path(_CONFIG.get("storage", {}).get("silver_dir", "data/silver"))
-GOLD_DIR = Path(_CONFIG.get("storage", {}).get("gold_dir", "data/gold"))
 
-
-def _load_silver(table_name: str, silver_dir: Path = SILVER_DIR) -> pd.DataFrame | None:
+def _load_silver(table_name: str, silver_dir: Path) -> pd.DataFrame | None:
     path = silver_dir / f"{table_name}.parquet"
     if not path.exists():
         logger.warning("Silver table not found: %s — skipping", path)
@@ -39,9 +35,16 @@ def build_dim_tracks(tracks: pd.DataFrame, artists: pd.DataFrame | None) -> pd.D
     df["primary_genre"] = df["primary_genre"].fillna("unknown")
 
     df["track_popularity"] = pd.to_numeric(df["popularity"], errors="coerce")
+
+    # Use median artist popularity for unmatched tracks rather than 0, which would
+    # unfairly penalise them in the composite score. Falls back to 0 when all are unknown.
+    median_ap = df["artist_popularity"].median()
+    ap_fill = median_ap if pd.notna(median_ap) else 0.0
+    ap = df["artist_popularity"].fillna(ap_fill)
+
     df["composite_popularity"] = (
         0.6 * df["track_popularity"].fillna(0) / 100
-        + 0.4 * df["artist_popularity"].fillna(0) / 100
+        + 0.4 * ap / 100
     ).clip(0, 1)
 
     keep = [
@@ -77,8 +80,12 @@ def build_fact_audio_features(
     return df[key_cols + feature_cols].reset_index(drop=True)
 
 
-def run(silver_dir: Path = SILVER_DIR, gold_dir: Path = GOLD_DIR) -> dict[str, DataQualityReport]:
+def run(silver_dir: Path | None = None, gold_dir: Path | None = None) -> dict[str, DataQualityReport]:
     """Silver → Gold: build dimensional model and persist as Parquet."""
+    cfg = load_config()
+    silver_dir = silver_dir or Path(cfg.get("storage", {}).get("silver_dir", "data/silver"))
+    gold_dir = gold_dir or Path(cfg.get("storage", {}).get("gold_dir", "data/gold"))
+
     tracks = _load_silver("tracks", silver_dir)
     if tracks is None or tracks.empty:
         logger.error("Silver tracks table missing or empty — cannot build gold layer")
