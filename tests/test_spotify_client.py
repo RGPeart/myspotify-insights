@@ -250,8 +250,8 @@ class TestAzureUpload:
 
         c.ingest(genres=["pop"], tracks_per_genre=2)
 
-        # tracks + artists files should be uploaded (audio_features returns [] due to mock)
-        assert mock_azure.upload_file.call_count >= 2
+        # tracks + audio_features + artists files should each be uploaded
+        assert mock_azure.upload_file.call_count == 3
         blob_args = [call.args[0].name for call in mock_azure.upload_file.call_args_list]
         assert any("tracks_" in name for name in blob_args)
         assert any("artists_" in name for name in blob_args)
@@ -269,7 +269,7 @@ class TestAzureUpload:
         assert summary["tracks"] == 1
 
     def test_upload_uses_bronze_dir_parent_as_base(self, client):
-        c, mock_sp, tmp_path = client
+        c, mock_sp, _ = client
         mock_azure = MagicMock()
         c._azure = mock_azure
 

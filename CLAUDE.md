@@ -41,7 +41,7 @@ pytest tests/path/to/test_file.py::test_function   # single test
 
 The system follows a **medallion data lakehouse pattern** (Bronze → Silver → Gold) with data flowing one-way through the pipeline before being served via API and dashboard.
 
-```
+```text
 Spotify API
     │
     ▼

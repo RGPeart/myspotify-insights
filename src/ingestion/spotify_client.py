@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 import yaml
@@ -17,7 +18,7 @@ logger = get_logger(__name__)
 
 
 def _load_config() -> dict:
-    config_path = Path("config/config.yaml")
+    config_path = Path(__file__).resolve().parents[2] / "config" / "config.yaml"
     if config_path.exists():
         with open(config_path) as f:
             return yaml.safe_load(f) or {}
@@ -65,7 +66,7 @@ class SpotifyIngestionClient:
         genres = genres or _default_genres()
         if tracks_per_genre is None:
             tracks_per_genre = int(_CONFIG.get("ingestion", {}).get("tracks_per_genre", 50))
-            logger.info("Starting ingestion | genres=%s, tracks_per_genre=%d", genres, tracks_per_genre)
+        logger.info("Starting ingestion | genres=%s, tracks_per_genre=%d", genres, tracks_per_genre)
 
         all_tracks = self._fetch_tracks_by_genre(genres, tracks_per_genre)
 
@@ -134,14 +135,13 @@ class SpotifyIngestionClient:
     def _fetch_audio_features(self, track_ids: list[str]) -> list[dict]:
         # Spotify deprecated this endpoint for new apps in Nov 2024 (requires Extended Quota Mode).
         # A 403 means the app lacks access; we skip gracefully rather than aborting ingestion.
-        import logging as _logging
-        spotipy_logger = _logging.getLogger("spotipy.client")
+        spotipy_logger = logging.getLogger("spotipy.client")
         features: list[dict] = []
         for batch in _batched(track_ids, 100):
             try:
                 # Temporarily silence spotipy's HTTP error log for this known-deprecated call.
                 prev_level = spotipy_logger.level
-                spotipy_logger.setLevel(_logging.CRITICAL)
+                spotipy_logger.setLevel(logging.CRITICAL)
                 try:
                     result = self._call_api(self.sp.audio_features, batch)
                 finally:
@@ -193,14 +193,19 @@ class SpotifyIngestionClient:
 
     def _load_manifest(self) -> dict:
         if MANIFEST_PATH.exists():
-            with open(MANIFEST_PATH, encoding="utf-8") as f:
-                return json.load(f)
+            try:
+                with open(MANIFEST_PATH, encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError, ValueError) as e:
+                logger.warning("Manifest at %s is invalid (%s); starting fresh.", MANIFEST_PATH, e)
         return {}
 
     def _save_manifest(self) -> None:
         MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
+        tmp = MANIFEST_PATH.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self._manifest, f, indent=2)
+        tmp.replace(MANIFEST_PATH)
 
     def _filter_new_ids(self, data_type: str, ids: list[str]) -> set[str]:
         known = set(self._manifest.get(data_type, {}).get("ids", []))
@@ -230,9 +235,10 @@ class SpotifyIngestionClient:
                 elif exc.http_status and 500 <= exc.http_status < 600:
                     wait = self.BACKOFF_BASE * (2 ** attempt)
                     logger.warning("Server error %d. Retry in %.1fs", exc.http_status, wait)
-                    time.sleep(wait)
                 else:
                     raise
+                if attempt < self.MAX_RETRIES - 1:
+                    time.sleep(wait)
         raise RuntimeError(f"Spotify API call failed after {self.MAX_RETRIES} retries")
 
 
