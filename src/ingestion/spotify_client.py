@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import spotipy
+from azure.core.exceptions import AzureError
 from dotenv import load_dotenv
 from spotipy.oauth2 import SpotifyClientCredentials
 
@@ -65,7 +66,7 @@ class SpotifyIngestionClient:
         """
         genres = genres or _default_genres()
         if tracks_per_genre is None:
-            tracks_per_genre = int(_CONFIG.get("ingestion", {}).get("tracks_per_genre", 50))
+            tracks_per_genre = _CONFIG.get("ingestion", {}).get("tracks_per_genre", 50)
         logger.info("Starting ingestion | genres=%s, tracks_per_genre=%d", genres, tracks_per_genre)
 
         all_tracks = self._fetch_tracks_by_genre(genres, tracks_per_genre)
@@ -183,7 +184,7 @@ class SpotifyIngestionClient:
         if self._azure:
             try:
                 self._azure.upload_file(dest_path, relative_to=BRONZE_DIR.parent)
-            except Exception as e:
+            except AzureError as e:
                 logger.error("Azure upload failed for %s: %s", dest_path, e)
         return dest_path
 
@@ -231,7 +232,6 @@ class SpotifyIngestionClient:
                     logger.warning(
                         "Rate limited. Retry in %.1fs (attempt %d/%d)", wait, attempt + 1, self.MAX_RETRIES
                     )
-                    time.sleep(wait)
                 elif exc.http_status and 500 <= exc.http_status < 600:
                     wait = self.BACKOFF_BASE * (2 ** attempt)
                     logger.warning("Server error %d. Retry in %.1fs", exc.http_status, wait)
