@@ -85,4 +85,4 @@ Required in `.env` (see `.env.example`):
 
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) triggers on push/PR to `main` and `develop`. The test and lint steps are currently commented out — uncomment them to re-enable pytest and flake8 runs on CI.
+GitHub Actions (`.github/workflows/ci.yml`) triggers on push/PR to `main` and `develop`. The test and lint steps are currently commented out — uncomment them to re-enable pytest and flake8 runs on CI
