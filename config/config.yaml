@@ -1,0 +1,21 @@
+spotify:
+  market: US
+  max_retries: 3
+  backoff_base_seconds: 1.0
+  default_genres:
+    - pop
+    - rock
+    - hip-hop
+    - electronic
+    - jazz
+    - r-n-b
+    - country
+    - classical
+
+ingestion:
+  tracks_per_genre: 50
+
+storage:
+  bronze_dir: data/bronze
+  silver_dir: data/silver
+  gold_dir: data/gold
