@@ -1,25 +1,15 @@
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
+from src.utils.config import load_config
 from src.utils.data_quality import DataQualityError, DataQualityReport, assert_quality, run_quality_checks
 from src.utils.logging_config import get_logger
 from src.utils.parquet_io import write_parquet
 
 logger = get_logger(__name__)
 
-_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "config.yaml"
-
-
-def _load_config() -> dict:
-    if _CONFIG_PATH.exists():
-        with open(_CONFIG_PATH) as f:
-            return yaml.safe_load(f) or {}
-    return {}
-
-
-_CONFIG = _load_config()
+_CONFIG = load_config()
 SILVER_DIR = Path(_CONFIG.get("storage", {}).get("silver_dir", "data/silver"))
 GOLD_DIR = Path(_CONFIG.get("storage", {}).get("gold_dir", "data/gold"))
 
@@ -42,8 +32,11 @@ def build_dim_tracks(tracks: pd.DataFrame, artists: pd.DataFrame | None) -> pd.D
         )
         df = df.join(artist_lookup, on="primary_artist_id")
     else:
-        df["primary_genre"] = "unknown"
+        df["primary_genre"] = None
         df["artist_popularity"] = None
+
+    # Fill NaN genre for tracks whose artist didn't match (partial or missing artists table)
+    df["primary_genre"] = df["primary_genre"].fillna("unknown")
 
     df["track_popularity"] = pd.to_numeric(df["popularity"], errors="coerce")
     df["composite_popularity"] = (

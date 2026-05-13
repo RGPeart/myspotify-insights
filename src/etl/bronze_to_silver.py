@@ -3,25 +3,15 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
+from src.utils.config import load_config
 from src.utils.data_quality import DataQualityError, DataQualityReport, assert_quality, run_quality_checks
 from src.utils.logging_config import get_logger
 from src.utils.parquet_io import write_parquet
 
 logger = get_logger(__name__)
 
-_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "config.yaml"
-
-
-def _load_config() -> dict:
-    if _CONFIG_PATH.exists():
-        with open(_CONFIG_PATH) as f:
-            return yaml.safe_load(f) or {}
-    return {}
-
-
-_CONFIG = _load_config()
+_CONFIG = load_config()
 BRONZE_DIR = Path(_CONFIG.get("storage", {}).get("bronze_dir", "data/bronze"))
 SILVER_DIR = Path(_CONFIG.get("storage", {}).get("silver_dir", "data/silver"))
 
@@ -73,8 +63,12 @@ def _load_bronze_files(data_type: str, bronze_dir: Path = BRONZE_DIR) -> list[di
         logger.warning("No bronze files found for data_type=%s under %s", data_type, bronze_dir)
         return records
     for path in paths:
-        with open(path, encoding="utf-8") as f:
-            batch = json.load(f)
+        try:
+            with open(path, encoding="utf-8") as f:
+                batch = json.load(f)
+        except json.JSONDecodeError:
+            logger.warning("Skipping malformed JSON in %s", path)
+            continue
         if isinstance(batch, list):
             records.extend(batch)
         else:

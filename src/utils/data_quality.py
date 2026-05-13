@@ -25,6 +25,18 @@ class DataQualityReport:
     def passed(self) -> bool:
         return not self.null_counts and not self.schema_errors and self.duplicate_count == 0
 
+    def __str__(self) -> str:
+        if self.passed:
+            return f"{self.table_name}: PASSED ({self.row_count} rows)"
+        issues = []
+        if self.null_counts:
+            issues.append(f"nulls={self.null_counts}")
+        if self.duplicate_count:
+            issues.append(f"duplicates={self.duplicate_count}")
+        if self.schema_errors:
+            issues.append(f"schema={self.schema_errors}")
+        return f"{self.table_name}: FAILED ({'; '.join(issues)})"
+
 
 def check_nulls(df: pd.DataFrame, required_cols: list[str]) -> dict[str, int]:
     """Return {col: null_count} for required columns that contain nulls."""

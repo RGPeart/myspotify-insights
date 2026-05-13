@@ -336,6 +336,23 @@ class TestBronzeToSilverRun:
         assert "audio_features" not in reports
         assert "artists" not in reports
 
+    def test_skips_malformed_json(self, tmp_path):
+        from src.etl.bronze_to_silver import _load_bronze_files
+        bronze = tmp_path / "bronze"
+        (bronze / "tracks").mkdir(parents=True)
+        (bronze / "tracks" / "bad.json").write_text("{not valid json}")
+        (bronze / "tracks" / "good.json").write_text(json.dumps([make_track()]))
+        records = _load_bronze_files("tracks", bronze)
+        assert len(records) == 1
+
+    def test_skips_non_list_json(self, tmp_path):
+        from src.etl.bronze_to_silver import _load_bronze_files
+        bronze = tmp_path / "bronze"
+        (bronze / "tracks").mkdir(parents=True)
+        (bronze / "tracks" / "file.json").write_text(json.dumps({"id": "t1"}))
+        records = _load_bronze_files("tracks", bronze)
+        assert records == []
+
     def test_quality_failure_prevents_write(self, tmp_path, monkeypatch):
         from src.etl import bronze_to_silver
 
@@ -428,10 +445,12 @@ class TestBuildDimTracks:
 
     def test_unmatched_artist_still_present(self):
         tracks = _make_silver_tracks()
-        # artist_id "a1" is not in artists
+        # artist_id "a1" is not in artists — unmatched track should get "unknown" genre, not NaN
         artists = _make_silver_artists().query("artist_id == 'a2'").reset_index(drop=True)
         dim = build_dim_tracks(tracks, artists)
         assert len(dim) == 2  # both tracks present
+        t1 = dim[dim["track_id"] == "t1"].iloc[0]
+        assert t1["primary_genre"] == "unknown"  # NaN would be a data leak
 
 
 class TestBuildDimArtists:
