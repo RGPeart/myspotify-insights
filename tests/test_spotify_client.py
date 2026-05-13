@@ -236,7 +236,7 @@ class TestIngest:
 
 class TestAzureUpload:
     def test_upload_called_for_each_data_type(self, client):
-        c, mock_sp, tmp_path = client
+        c, mock_sp, _ = client
         mock_azure = MagicMock()
         c._azure = mock_azure
 

@@ -55,7 +55,7 @@ class SpotifyIngestionClient:
     # Public interface                                                     #
     # ------------------------------------------------------------------ #
 
-    def ingest(self, genres: list[str] | None = None, tracks_per_genre: int = 50) -> dict:
+    def ingest(self, genres: list[str] | None = None, tracks_per_genre: int | None = None) -> dict:
         """
         Run a full ingestion cycle: search tracks by genre → fetch audio features
         and artist metadata → save new records to the bronze layer.
@@ -63,7 +63,9 @@ class SpotifyIngestionClient:
         Returns a summary dict: {"tracks": N, "audio_features": N, "artists": N}.
         """
         genres = genres or _default_genres()
-        logger.info("Starting ingestion | genres=%s, tracks_per_genre=%d", genres, tracks_per_genre)
+        if tracks_per_genre is None:
+            tracks_per_genre = int(_CONFIG.get("ingestion", {}).get("tracks_per_genre", 50))
+            logger.info("Starting ingestion | genres=%s, tracks_per_genre=%d", genres, tracks_per_genre)
 
         all_tracks = self._fetch_tracks_by_genre(genres, tracks_per_genre)
 
@@ -169,8 +171,9 @@ class SpotifyIngestionClient:
     def _save_to_bronze(self, records: list[dict], data_type: str) -> Path | None:
         if not records:
             return None
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now_utc = datetime.now(timezone.utc)
+        timestamp = now_utc.strftime("%Y%m%dT%H%M%SZ")
+        date_str = now_utc.strftime("%Y-%m-%d")
         dest_dir = BRONZE_DIR / data_type / date_str
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_path = dest_dir / f"{data_type}_{timestamp}.json"
@@ -178,7 +181,10 @@ class SpotifyIngestionClient:
             json.dump(records, f, indent=2, ensure_ascii=False)
         logger.info("Saved %d %s records -> %s", len(records), data_type, dest_path)
         if self._azure:
-            self._azure.upload_file(dest_path, relative_to=BRONZE_DIR.parent)
+            try:
+                self._azure.upload_file(dest_path, relative_to=BRONZE_DIR.parent)
+            except Exception as e:
+                logger.error("Azure upload failed for %s: %s", dest_path, e)
         return dest_path
 
     # ------------------------------------------------------------------ #
