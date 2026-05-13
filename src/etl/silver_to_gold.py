@@ -3,7 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from src.utils.config import load_config
-from src.utils.data_quality import DataQualityError, DataQualityReport, assert_quality, run_quality_checks
+from src.utils.data_quality import DataQualityReport, assert_quality, run_quality_checks
 from src.utils.logging_config import get_logger
 from src.utils.parquet_io import write_parquet
 

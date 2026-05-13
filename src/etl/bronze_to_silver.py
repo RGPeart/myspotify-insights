@@ -5,15 +5,17 @@ import numpy as np
 import pandas as pd
 
 from src.utils.config import load_config
-from src.utils.data_quality import DataQualityError, DataQualityReport, assert_quality, run_quality_checks
+from src.utils.data_quality import DataQualityReport, assert_quality, run_quality_checks
 from src.utils.logging_config import get_logger
 from src.utils.parquet_io import write_parquet
 
 logger = get_logger(__name__)
 
 # Sub-genre patterns → broad category.  Order matters: more specific first.
-# "pop" is intentionally a catch-all at the tail — any genre not matched
-# above that contains "pop" as a substring will land here.
+# "folk" intentionally precedes "rock" so that compound genres like "folk rock"
+# are categorized as folk rather than rock.
+# "pop" is intentionally the catch-all tail — any genre not matched above that
+# contains "pop" as a substring will land here (e.g. "dream pop", "synth-pop").
 _GENRE_PATTERNS: list[tuple[str, list[str]]] = [
     ("hip-hop",     ["hip-hop", "hip hop", "rap", "trap", "drill", "grime"]),
     ("electronic",  ["electronic", "edm", "house", "techno", "electro", "dubstep", "trance", "synth"]),
@@ -60,6 +62,7 @@ def _load_bronze_files(data_type: str, bronze_dir: Path) -> list[dict]:
     if not paths:
         logger.warning("No bronze files found for data_type=%s under %s", data_type, bronze_dir)
         return records
+    loaded_count = 0
     for path in paths:
         try:
             with open(path, encoding="utf-8") as f:
@@ -69,9 +72,10 @@ def _load_bronze_files(data_type: str, bronze_dir: Path) -> list[dict]:
             continue
         if isinstance(batch, list):
             records.extend(batch)
+            loaded_count += 1
         else:
             logger.warning("Skipping non-list JSON in %s", path)
-    logger.info("Loaded %d raw %s records from %d file(s)", len(records), data_type, len(paths))
+    logger.info("Loaded %d raw %s records from %d file(s)", len(records), data_type, loaded_count)
     return records
 
 

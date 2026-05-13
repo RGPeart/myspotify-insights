@@ -129,6 +129,18 @@ class TestDataQuality:
         report = DataQualityReport(table_name="test", row_count=5)
         assert_quality(report)  # should not raise
 
+    def test_empty_dataframe_fails_quality_check(self):
+        df = pd.DataFrame({"id": pd.Series([], dtype=str)})
+        report = run_quality_checks(df, "test", required_cols=["id"], key_cols=["id"])
+        assert report.passed is False
+        assert report.row_count == 0
+
+    def test_assert_quality_raises_on_empty_dataframe(self):
+        report = DataQualityReport(table_name="test", row_count=0)
+        with pytest.raises(DataQualityError) as exc_info:
+            assert_quality(report)
+        assert "empty (0 rows)" in str(exc_info.value)
+
 
 # ------------------------------------------------------------------ #
 # Bronze → Silver                                                     #

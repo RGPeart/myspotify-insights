@@ -23,12 +23,19 @@ class DataQualityReport:
 
     @property
     def passed(self) -> bool:
-        return not self.null_counts and not self.schema_errors and self.duplicate_count == 0
+        return (
+            self.row_count > 0
+            and not self.null_counts
+            and not self.schema_errors
+            and self.duplicate_count == 0
+        )
 
     def __str__(self) -> str:
         if self.passed:
             return f"{self.table_name}: PASSED ({self.row_count} rows)"
         issues = []
+        if self.row_count == 0:
+            issues.append("empty (0 rows)")
         if self.null_counts:
             issues.append(f"nulls={self.null_counts}")
         if self.duplicate_count:
@@ -96,6 +103,8 @@ def run_quality_checks(
 
 def assert_quality(report: DataQualityReport) -> None:
     """Log all quality issues and raise DataQualityError if the report failed."""
+    if report.row_count == 0:
+        logger.warning("[%s] row count check failed: 0 rows", report.table_name)
     if report.null_counts:
         for col, n in report.null_counts.items():
             logger.warning("[%s] null check failed: %s has %d null(s)", report.table_name, col, n)
