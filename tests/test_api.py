@@ -131,18 +131,26 @@ def empty_client():
 # ------------------------------------------------------------------ #
 
 class TestHealth:
+    # The health endpoint must always return HTTP 200 so load balancers and uptime
+    # monitors can confirm the service process is running.
     def test_returns_200(self, full_client):
         response = full_client.get("/health")
         assert response.status_code == 200
 
+    # The status field must equal "ok" so automated monitors can parse the response
+    # body and trigger alerts when the value changes.
     def test_returns_ok_status(self, full_client):
         data = full_client.get("/health").json()
         assert data["status"] == "ok"
 
+    # A version field must be present to help operators correlate health check
+    # responses with specific deployments during incident investigations.
     def test_returns_version(self, full_client):
         data = full_client.get("/health").json()
         assert "version" in data
 
+    # The health check must succeed even when no model or gold data is loaded,
+    # because it tests process availability rather than data readiness.
     def test_works_without_data(self, empty_client):
         response = empty_client.get("/health")
         assert response.status_code == 200
@@ -153,27 +161,39 @@ class TestHealth:
 # ------------------------------------------------------------------ #
 
 class TestRecommendations:
+    # A synthetic user present in the training set must receive a successful 200 response,
+    # confirming the full recommendation path executes without error.
     def test_known_user_returns_200(self, full_client):
         response = full_client.get("/recommendations/user_energetic")
         assert response.status_code == 200
 
+    # The response body must contain a recommendations list so client code can iterate
+    # over results without needing to handle a non-list payload.
     def test_response_contains_recommendations_list(self, full_client):
         data = full_client.get("/recommendations/user_energetic").json()
         assert "recommendations" in data
         assert isinstance(data["recommendations"], list)
 
+    # The user_id must be echoed back in the response so clients batching multiple
+    # requests can match each response to its originating user.
     def test_response_contains_user_id(self, full_client):
         data = full_client.get("/recommendations/user_energetic").json()
         assert data["user_id"] == "user_energetic"
 
+    # The count field must equal the actual list length; a mismatch would confuse
+    # clients that use count to allocate or validate pagination.
     def test_count_field_matches_list_length(self, full_client):
         data = full_client.get("/recommendations/user_energetic").json()
         assert data["count"] == len(data["recommendations"])
 
+    # The n query parameter must cap the number of returned recommendations; ignoring
+    # it would always return the default count regardless of what the client requested.
     def test_n_query_param_limits_results(self, full_client):
         data = full_client.get("/recommendations/user_chill?n=2").json()
         assert len(data["recommendations"]) <= 2
 
+    # Each recommendation item must include track_id, score, and reason so clients
+    # can display and act on the data without a second lookup.
     def test_each_recommendation_has_required_fields(self, full_client):
         data = full_client.get("/recommendations/user_energetic").json()
         for rec in data["recommendations"]:
@@ -181,16 +201,22 @@ class TestRecommendations:
             assert "score" in rec
             assert "reason" in rec
 
+    # When gold data is loaded, each recommendation must include a human-readable
+    # track name so dashboard consumers can display results without an additional API call.
     def test_enriched_with_track_metadata(self, full_client):
         data = full_client.get("/recommendations/user_energetic").json()
         if data["recommendations"]:
             rec = data["recommendations"][0]
             assert "name" in rec
 
+    # A completely unknown user with no liked tracks has no usable signal and must
+    # receive an empty recommendations list rather than a 404 or 500 error.
     def test_unknown_user_with_no_liked_returns_empty(self, full_client):
         data = full_client.get("/recommendations/completely_unknown_user").json()
         assert data["recommendations"] == []
 
+    # Without a trained model, the endpoint must return 503 to signal that the
+    # service is not ready rather than pretending to serve recommendations.
     def test_no_model_returns_503(self, empty_client):
         response = empty_client.get("/recommendations/user_energetic")
         assert response.status_code == 503
@@ -201,33 +227,47 @@ class TestRecommendations:
 # ------------------------------------------------------------------ #
 
 class TestTrackDetail:
+    # A track ID present in dim_tracks must return HTTP 200, confirming the lookup
+    # and serialisation path work correctly end-to-end.
     def test_existing_track_returns_200(self, full_client):
         response = full_client.get("/tracks/t0")
         assert response.status_code == 200
 
+    # The response must echo back the track_id so clients can confirm they received
+    # the correct record when looking up by ID.
     def test_returns_track_id(self, full_client):
         data = full_client.get("/tracks/t0").json()
         assert data["track_id"] == "t0"
 
+    # The track name must be present so clients can display the result without an
+    # additional lookup; a missing name field would break the dashboard UI.
     def test_returns_track_name(self, full_client):
         data = full_client.get("/tracks/t0").json()
         assert "name" in data
 
+    # Audio features must be nested in an audio_features sub-object so clients can
+    # access them in a single request rather than needing a separate feature endpoint.
     def test_includes_audio_features(self, full_client):
         data = full_client.get("/tracks/t0").json()
         assert "audio_features" in data
         assert "danceability" in data["audio_features"]
 
+    # Join key columns (track_id, primary_artist_id, album_id) must not appear inside
+    # audio_features to avoid confusing duplication in the response structure.
     def test_audio_features_exclude_key_columns(self, full_client):
         data = full_client.get("/tracks/t0").json()
         af = data.get("audio_features", {})
         assert "track_id" not in af
         assert "primary_artist_id" not in af
 
+    # An unknown track ID must return 404 rather than 500 so clients can distinguish
+    # a not-found result from an internal server error.
     def test_missing_track_returns_404(self, full_client):
         response = full_client.get("/tracks/nonexistent_track_id")
         assert response.status_code == 404
 
+    # When dim_tracks hasn't been loaded, the endpoint must return 503 so clients
+    # know the service is unavailable rather than getting an unexpected 500 crash.
     def test_no_data_returns_503(self, empty_client):
         response = empty_client.get("/tracks/t0")
         assert response.status_code == 503
@@ -238,22 +278,32 @@ class TestTrackDetail:
 # ------------------------------------------------------------------ #
 
 class TestArtistDetail:
+    # A known artist ID must return HTTP 200, confirming the artist lookup and
+    # serialisation work correctly end-to-end.
     def test_existing_artist_returns_200(self, full_client):
         response = full_client.get("/artists/a0")
         assert response.status_code == 200
 
+    # The response must include the artist_id field confirming the correct record
+    # was retrieved rather than a neighbour row.
     def test_returns_artist_id(self, full_client):
         data = full_client.get("/artists/a0").json()
         assert data["artist_id"] == "a0"
 
+    # The artist name must be present for display in the dashboard and by API
+    # consumers that list artist metadata alongside recommendations.
     def test_returns_artist_name(self, full_client):
         data = full_client.get("/artists/a0").json()
         assert "artist_name" in data
 
+    # An unknown artist ID must return 404 so clients can distinguish a not-found
+    # result from an internal server error and handle it appropriately.
     def test_missing_artist_returns_404(self, full_client):
         response = full_client.get("/artists/nonexistent_artist")
         assert response.status_code == 404
 
+    # When dim_artists hasn't been loaded, the endpoint must return 503 so clients
+    # know the service is unavailable rather than receiving an unexpected 500 crash.
     def test_no_data_returns_503(self, empty_client):
         response = empty_client.get("/artists/a0")
         assert response.status_code == 503
