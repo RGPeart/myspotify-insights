@@ -231,6 +231,10 @@ data/silver/*
 data/gold/*
 !data/*/.gitkeep
 
+# Generated model artifacts
+models/
+*.pkl
+
 # Secrets and config
 config/secrets.yaml
 *.key
