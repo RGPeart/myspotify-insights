@@ -102,7 +102,7 @@ The ingestion pipeline connects to the Spotify Web API using OAuth. You need to 
 
 3. Fill in any name and description (e.g. "MySpotify Insights"). Set the **Redirect URI** to:
    ```
-   http://localhost:8888/callback
+   http://localhost:5000/callback
    ```
    Accept the terms and click **Save**.
 
@@ -130,7 +130,7 @@ Open `.env` in any text editor and fill in your values:
 # Spotify API Credentials (from step 5)
 SPOTIFY_CLIENT_ID=paste_your_client_id_here
 SPOTIFY_CLIENT_SECRET=paste_your_client_secret_here
-SPOTIFY_REDIRECT_URI=http://localhost:8888/callback
+SPOTIFY_REDIRECT_URI=http://localhost:5000/callback
 
 # Azure Storage — leave as-is if running locally only
 AZURE_STORAGE_CONNECTION_STRING=your_connection_string_here
@@ -138,7 +138,7 @@ AZURE_STORAGE_CONTAINER_NAME=spotify-data
 
 # API Configuration — defaults are fine for local development
 API_HOST=0.0.0.0
-API_PORT=8000
+API_PORT=5000
 ```
 
 Save the file. You do **not** need to fill in the Azure variables to run Features 1 and 2 locally.
@@ -157,7 +157,7 @@ python -m src.ingestion.spotify_client
 
 ### What happens
 
-The first time you run this, your browser will open and ask you to log in to Spotify and authorise the app. After you confirm, the page will redirect to `localhost:8888/callback` — the page will appear to fail (that is expected), but the token has been captured.
+The first time you run this, your browser will open and ask you to log in to Spotify and authorise the app. After you confirm, the page will redirect to `localhost:5000/callback` — the page will appear to fail (that is expected), but the token has been captured.
 
 The script will then:
 - Fetch tracks across several genre categories

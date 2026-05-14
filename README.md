@@ -17,7 +17,7 @@ MySpotify Insights demonstrates production-grade data engineering practices by b
 
 The system follows a **medallion data lakehouse pattern** with data flowing one-way through each layer before being served by the API and dashboard.
 
-```
+```text
 Spotify API
     │
     ▼
