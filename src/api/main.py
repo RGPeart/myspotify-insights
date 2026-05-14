@@ -35,8 +35,20 @@ async def lifespan(app: FastAPI):
             setattr(app.state, table, None)
             logger.warning("Gold table not found: %s", path)
 
+    # Pre-build O(1) lookup indexes so routes don't rebuild them per request
+    dt = app.state.dim_tracks
+    da = app.state.dim_artists
+    af = app.state.fact_audio_features
+    app.state.track_map = dt.set_index("track_id").to_dict("index") if dt is not None else {}
+    app.state.tracks_idx = dt.set_index("track_id") if dt is not None else None
+    app.state.artists_idx = da.set_index("artist_id") if da is not None else None
+    app.state.af_idx = af.set_index("track_id") if af is not None else None
+
     yield
-    app.state.artifacts = None
+
+    for attr in ("artifacts", "dim_tracks", "dim_artists", "fact_audio_features",
+                 "track_map", "tracks_idx", "artists_idx", "af_idx"):
+        setattr(app.state, attr, None)
 
 
 app = FastAPI(

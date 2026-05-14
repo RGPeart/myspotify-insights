@@ -257,7 +257,7 @@ class TestFetchAudioFeaturesReccoBeats:
 
         def fake_call_rb(url):
             if "/audio-features" in url:
-                rb_id = url.rstrip("/audio-features").rsplit("/", 1)[-1]
+                rb_id = url.removesuffix("/audio-features").rsplit("/", 1)[-1]
                 return features_resps[rb_id]
             return lookup_resp
 

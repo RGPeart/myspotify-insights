@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from src.models.predict import get_recommendations as _get_recs
 from src.utils.logging_config import get_logger
@@ -44,16 +44,22 @@ def _serialize(data: dict) -> dict:
 # ------------------------------------------------------------------ #
 
 @router.get("/health")
-async def health():
-    return {"status": "ok", "version": "1.0.0"}
+async def health(request: Request):
+    return {"status": "ok", "version": request.app.version}
 
 
 @router.get("/recommendations/{user_id}")
-async def recommendations(user_id: str, request: Request, n: int = 10):
+async def recommendations(
+    user_id: str,
+    request: Request,
+    n: int | None = Query(default=None, ge=1, le=100),
+):
     artifacts = getattr(request.app.state, "artifacts", None)
     if artifacts is None:
         raise HTTPException(status_code=503, detail="Model not loaded — run `python -m src.models.train` first")
 
+    if n is None:
+        n = getattr(request.app.state, "n_recommendations", 10)
     collab_weight: float = getattr(request.app.state, "collab_weight", 0.7)
     recs = _get_recs(
         user_id=user_id,
@@ -63,9 +69,8 @@ async def recommendations(user_id: str, request: Request, n: int = 10):
         collab_weight=collab_weight,
     )
 
-    dim_tracks = getattr(request.app.state, "dim_tracks", None)
-    if dim_tracks is not None and not dim_tracks.empty:
-        track_map: dict = dim_tracks.set_index("track_id").to_dict("index")
+    track_map: dict = getattr(request.app.state, "track_map", {})
+    if track_map:
         meta_keys = ("name", "primary_artist_name", "primary_genre", "composite_popularity")
         enriched = [
             {**r, **{k: track_map.get(r["track_id"], {}).get(k) for k in meta_keys}}
@@ -78,37 +83,39 @@ async def recommendations(user_id: str, request: Request, n: int = 10):
 
 @router.get("/tracks/{track_id}")
 async def track_detail(track_id: str, request: Request):
-    dim_tracks = getattr(request.app.state, "dim_tracks", None)
-    if dim_tracks is None:
+    tracks_idx = getattr(request.app.state, "tracks_idx", None)
+    if tracks_idx is None:
         raise HTTPException(status_code=503, detail="Track data not loaded")
 
-    rows = dim_tracks[dim_tracks["track_id"] == track_id]
-    if rows.empty:
+    try:
+        track = _serialize(tracks_idx.loc[track_id].to_dict())
+        track["track_id"] = track_id
+    except KeyError:
         raise HTTPException(status_code=404, detail=f"Track '{track_id}' not found")
 
-    track = _serialize(rows.iloc[0].to_dict())
-
-    fact_af = getattr(request.app.state, "fact_audio_features", None)
-    if fact_af is not None:
-        af_rows = fact_af[fact_af["track_id"] == track_id]
-        if not af_rows.empty:
+    af_idx = getattr(request.app.state, "af_idx", None)
+    if af_idx is not None:
+        try:
             skip = {"track_id", "primary_artist_id", "album_id"}
             track["audio_features"] = {
-                k: v for k, v in _serialize(af_rows.iloc[0].to_dict()).items()
+                k: v for k, v in _serialize(af_idx.loc[track_id].to_dict()).items()
                 if k not in skip
             }
+        except KeyError:
+            pass
 
     return track
 
 
 @router.get("/artists/{artist_id}")
 async def artist_detail(artist_id: str, request: Request):
-    dim_artists = getattr(request.app.state, "dim_artists", None)
-    if dim_artists is None:
+    artists_idx = getattr(request.app.state, "artists_idx", None)
+    if artists_idx is None:
         raise HTTPException(status_code=503, detail="Artist data not loaded")
 
-    rows = dim_artists[dim_artists["artist_id"] == artist_id]
-    if rows.empty:
+    try:
+        artist = _serialize(artists_idx.loc[artist_id].to_dict())
+        artist["artist_id"] = artist_id
+        return artist
+    except KeyError:
         raise HTTPException(status_code=404, detail=f"Artist '{artist_id}' not found")
-
-    return _serialize(rows.iloc[0].to_dict())

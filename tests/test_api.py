@@ -105,6 +105,10 @@ def full_client(shared_data):
         "dim_tracks": dim_tracks,
         "dim_artists": dim_artists,
         "fact_audio_features": fact_af,
+        "track_map": dim_tracks.set_index("track_id").to_dict("index"),
+        "tracks_idx": dim_tracks.set_index("track_id"),
+        "artists_idx": dim_artists.set_index("artist_id"),
+        "af_idx": fact_af.set_index("track_id"),
         "collab_weight": 0.7,
         "n_recommendations": 10,
     })
@@ -120,6 +124,10 @@ def empty_client():
         "dim_tracks": None,
         "dim_artists": None,
         "fact_audio_features": None,
+        "track_map": {},
+        "tracks_idx": None,
+        "artists_idx": None,
+        "af_idx": None,
         "collab_weight": 0.7,
     })
     with TestClient(app) as client:
