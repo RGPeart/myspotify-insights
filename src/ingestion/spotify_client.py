@@ -6,6 +6,7 @@ import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 
+import requests
 import spotipy
 from azure.core.exceptions import AzureError
 from dotenv import load_dotenv
@@ -16,6 +17,9 @@ from src.utils.logging_config import get_logger
 
 load_dotenv()
 logger = get_logger(__name__)
+
+_RECCOBEATS_BASE = "https://api.reccobeats.com/v1"
+_RECCOBEATS_HEADERS = {"User-Agent": "MySpotifyInsights/1.0", "Accept": "application/json"}
 
 
 def _load_config() -> dict:
@@ -48,6 +52,8 @@ class SpotifyIngestionClient:
         self.sp = spotipy.Spotify(auth_manager=auth)
         self._manifest = self._load_manifest()
         self._azure = AzureBlobUploader.from_env()
+        self._rb_session = requests.Session()
+        self._rb_session.headers.update(_RECCOBEATS_HEADERS)
         if self._azure:
             logger.info("Azure Blob Storage upload enabled (container: %s)", os.getenv("AZURE_STORAGE_CONTAINER_NAME"))
         else:
@@ -102,6 +108,45 @@ class SpotifyIngestionClient:
         logger.info("Ingestion complete | %s", summary)
         return summary
 
+    def backfill_audio_features(self) -> int:
+        """Fetch and store audio features for all tracks already in the manifest.
+
+        Needed for tracks ingested before the ReccoBeats integration was added.
+        Skips any Spotify IDs that already have a bronze audio_features record.
+        Returns the number of feature records written.
+        """
+        track_ids = self._manifest.get("tracks", {}).get("ids", [])
+        if not track_ids:
+            logger.info("No tracks in manifest — nothing to backfill")
+            return 0
+
+        existing_af: set[str] = set()
+        for f in BRONZE_DIR.glob("audio_features/**/*.json"):
+            try:
+                records = json.loads(f.read_text(encoding="utf-8"))
+                if isinstance(records, list):
+                    existing_af.update(r["id"] for r in records if r and "id" in r)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        missing = [tid for tid in track_ids if tid not in existing_af]
+        if not missing:
+            logger.info("All %d tracks already have audio features in bronze", len(track_ids))
+            return 0
+
+        logger.info(
+            "Backfilling audio features for %d tracks (%d already present, skipped)",
+            len(missing), len(track_ids) - len(missing),
+        )
+        features = self._fetch_audio_features(missing)
+        if not features:
+            logger.warning("Backfill returned no features — check ReccoBeats connectivity")
+            return 0
+
+        self._save_to_bronze(features, "audio_features")
+        logger.info("Backfill complete: %d audio feature records written", len(features))
+        return len(features)
+
     # ------------------------------------------------------------------ #
     # Private fetch methods                                                #
     # ------------------------------------------------------------------ #
@@ -134,28 +179,47 @@ class SpotifyIngestionClient:
         return list(seen.values())
 
     def _fetch_audio_features(self, track_ids: list[str]) -> list[dict]:
-        # Spotify deprecated this endpoint for new apps in Nov 2024 (requires Extended Quota Mode).
-        # A 403 means the app lacks access; we skip gracefully rather than aborting ingestion.
-        spotipy_logger = logging.getLogger("spotipy.client")
-        features: list[dict] = []
-        for batch in _batched(track_ids, 100):
+        """Fetch audio features from ReccoBeats in two steps:
+        1. Batch-resolve Spotify IDs to ReccoBeats UUIDs.
+        2. Fetch audio features per ReccoBeats UUID.
+        The returned records use the original Spotify track ID as "id" so the
+        existing bronze → silver transform requires no changes.
+        """
+        # Step 1: resolve Spotify IDs → ReccoBeats IDs (max 40 per request)
+        rb_id_map: dict[str, str] = {}  # spotify_id → reccobeats_id
+        for batch in _batched(track_ids, 40):
+            url = f"{_RECCOBEATS_BASE}/track?ids={','.join(batch)}"
             try:
-                # Temporarily silence spotipy's HTTP error log for this known-deprecated call.
-                prev_level = spotipy_logger.level
-                spotipy_logger.setLevel(logging.CRITICAL)
-                try:
-                    result = self._call_api(self.sp.audio_features, batch)
-                finally:
-                    spotipy_logger.setLevel(prev_level)
-                features.extend(r for r in result if r is not None)
-            except spotipy.SpotifyException as exc:
-                if exc.http_status == 403:
-                    logger.warning(
-                        "audio-features endpoint returned 403 (deprecated for new Spotify apps, "
-                        "Extended Quota Mode required). Audio features will not be stored."
-                    )
-                    return []
-                raise
+                data = self._call_rb(url)
+                for item in data.get("content", []):
+                    # href is "https://open.spotify.com/track/{spotify_id}"
+                    spotify_id = item.get("href", "").rsplit("/", 1)[-1]
+                    if spotify_id and item.get("id"):
+                        rb_id_map[spotify_id] = item["id"]
+            except Exception as exc:
+                logger.warning("ReccoBeats track lookup failed for batch: %s", exc)
+
+        if not rb_id_map:
+            logger.warning("ReccoBeats resolved 0 of %d track IDs", len(track_ids))
+            return []
+
+        logger.info("Resolved %d / %d tracks to ReccoBeats IDs", len(rb_id_map), len(track_ids))
+
+        # Step 2: fetch audio features for each resolved ReccoBeats ID
+        features: list[dict] = []
+        for spotify_id, rb_id in rb_id_map.items():
+            url = f"{_RECCOBEATS_BASE}/track/{rb_id}/audio-features"
+            try:
+                data = self._call_rb(url)
+                # Replace ReccoBeats UUID with Spotify ID so transform_audio_features
+                # can join on track_id without any schema changes.
+                data["id"] = spotify_id
+                features.append(data)
+            except Exception as exc:
+                logger.warning("ReccoBeats audio features failed for %s (%s): %s", spotify_id, rb_id, exc)
+            time.sleep(0.05)  # stay polite to the public API
+
+        logger.info("Fetched %d audio feature records from ReccoBeats", len(features))
         return features
 
     def _fetch_artists(self, artist_ids: list[str]) -> list[dict]:
@@ -164,6 +228,12 @@ class SpotifyIngestionClient:
             result = self._call_api(self.sp.artists, batch)
             artists.extend(a for a in result["artists"] if a is not None)
         return artists
+
+    def _call_rb(self, url: str) -> dict:
+        """GET a ReccoBeats URL and return the parsed JSON, raising on HTTP errors."""
+        resp = self._rb_session.get(url, timeout=10)
+        resp.raise_for_status()
+        return resp.json()
 
     # ------------------------------------------------------------------ #
     # Bronze layer storage                                                 #
