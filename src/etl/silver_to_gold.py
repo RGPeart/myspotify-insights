@@ -90,7 +90,7 @@ def run(silver_dir: Path | None = None, gold_dir: Path | None = None) -> dict[st
     if tracks is None or tracks.empty:
         msg = "Silver tracks table missing or empty — cannot build gold layer"
         logger.error(msg)
-        raise RuntimeError(msg)
+        return {}
 
     audio_features = _load_silver("audio_features", silver_dir)
     artists = _load_silver("artists", silver_dir)
