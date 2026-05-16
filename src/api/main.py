@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from src.utils.config import load_config
 from src.utils.logging_config import get_logger
+from src.api.routes import router
 
 logger = get_logger(__name__)
 
@@ -59,5 +60,4 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from src.api.routes import router
 app.include_router(router)
