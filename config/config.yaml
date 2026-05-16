@@ -19,3 +19,9 @@ storage:
   bronze_dir: data/bronze
   silver_dir: data/silver
   gold_dir: data/gold
+
+models:
+  models_dir: models
+  n_recommendations: 10
+  collab_weight: 0.7
+  n_components: 20
