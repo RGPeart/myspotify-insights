@@ -161,6 +161,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Litellm configuration file (contains Google Gemini API key)
+litellm_config.yml
+
 # Spyder project settings
 .spyderproject
 .spyproject
