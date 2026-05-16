@@ -44,12 +44,14 @@ class SpotifyIngestionClient:
     BACKOFF_BASE: float = _spotify_cfg.get("backoff_base_seconds", 1.0)
     MARKET: str = _spotify_cfg.get("market", "US")
 
-    def __init__(self) -> None:
+    def __init__(self, bronze_dir: Path = BRONZE_DIR) -> None:
         auth = SpotifyClientCredentials(
             client_id=os.environ["SPOTIFY_CLIENT_ID"],
             client_secret=os.environ["SPOTIFY_CLIENT_SECRET"],
         )
         self.sp = spotipy.Spotify(auth_manager=auth)
+        self.bronze_dir = bronze_dir
+        self._manifest_path = self.bronze_dir / "manifest.json"
         self._manifest = self._load_manifest()
         self._azure = AzureBlobUploader.from_env()
         self._rb_session = requests.Session()
@@ -121,7 +123,7 @@ class SpotifyIngestionClient:
             return 0
 
         existing_af: set[str] = set()
-        for f in BRONZE_DIR.glob("audio_features/**/*.json"):
+        for f in self.bronze_dir.glob("audio_features/**/*.json"):
             try:
                 records = json.loads(f.read_text(encoding="utf-8"))
                 if isinstance(records, list):
@@ -196,7 +198,7 @@ class SpotifyIngestionClient:
                     spotify_id = item.get("href", "").rsplit("/", 1)[-1]
                     if spotify_id and item.get("id"):
                         rb_id_map[spotify_id] = item["id"]
-            except Exception as exc:
+            except requests.exceptions.RequestException as exc:
                 logger.warning("ReccoBeats track lookup failed for batch: %s", exc)
 
         if not rb_id_map:
@@ -215,7 +217,7 @@ class SpotifyIngestionClient:
                 # can join on track_id without any schema changes.
                 data["id"] = spotify_id
                 features.append(data)
-            except Exception as exc:
+            except requests.exceptions.RequestException as exc:
                 logger.warning("ReccoBeats audio features failed for %s (%s): %s", spotify_id, rb_id, exc)
             time.sleep(0.05)  # stay polite to the public API
 
@@ -230,10 +232,34 @@ class SpotifyIngestionClient:
         return artists
 
     def _call_rb(self, url: str) -> dict:
-        """GET a ReccoBeats URL and return the parsed JSON, raising on HTTP errors."""
-        resp = self._rb_session.get(url, timeout=10)
-        resp.raise_for_status()
-        return resp.json()
+        """GET a ReccoBeats URL and return the parsed JSON, with retry logic on transient errors."""
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                resp = self._rb_session.get(url, timeout=10)
+                resp.raise_for_status()
+                return resp.json()
+            except requests.exceptions.HTTPError as exc:
+                if exc.response.status_code == 429:
+                    headers = exc.response.headers
+                    wait = float(headers.get("Retry-After", self.BACKOFF_BASE * (2 ** attempt)))
+                    logger.warning(
+                        "ReccoBeats rate limited. Retry in %.1fs (attempt %d/%d)", wait, attempt + 1, self.MAX_RETRIES
+                    )
+                elif 500 <= exc.response.status_code < 600:
+                    wait = self.BACKOFF_BASE * (2 ** attempt)
+                    logger.warning("ReccoBeats server error %d. Retry in %.1fs", exc.response.status_code, wait)
+                else:
+                    raise
+                if attempt < self.MAX_RETRIES - 1:
+                    time.sleep(wait)
+            except requests.exceptions.RequestException as exc:
+                logger.warning(
+                    "ReccoBeats connection error: %s. Retrying in %.1fs (attempt %d/%d)",
+                    exc, self.BACKOFF_BASE * (2 ** attempt), attempt + 1, self.MAX_RETRIES
+                )
+                if attempt < self.MAX_RETRIES - 1:
+                    time.sleep(self.BACKOFF_BASE * (2 ** attempt))
+        raise RuntimeError(f"ReccoBeats API call failed after {self.MAX_RETRIES} retries")
 
     # ------------------------------------------------------------------ #
     # Bronze layer storage                                                 #
@@ -245,7 +271,7 @@ class SpotifyIngestionClient:
         now_utc = datetime.now(timezone.utc)
         timestamp = now_utc.strftime("%Y%m%dT%H%M%SZ")
         date_str = now_utc.strftime("%Y-%m-%d")
-        dest_dir = BRONZE_DIR / data_type / date_str
+        dest_dir = self.bronze_dir / data_type / date_str
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest_path = dest_dir / f"{data_type}_{timestamp}.json"
         with open(dest_path, "w", encoding="utf-8") as f:
@@ -263,20 +289,20 @@ class SpotifyIngestionClient:
     # ------------------------------------------------------------------ #
 
     def _load_manifest(self) -> dict:
-        if MANIFEST_PATH.exists():
+        if self._manifest_path.exists():
             try:
-                with open(MANIFEST_PATH, encoding="utf-8") as f:
+                with open(self._manifest_path, encoding="utf-8") as f:
                     return json.load(f)
             except (json.JSONDecodeError, OSError, ValueError) as e:
-                logger.warning("Manifest at %s is invalid (%s); starting fresh.", MANIFEST_PATH, e)
+                logger.warning("Manifest at %s is invalid (%s); starting fresh.", self._manifest_path, e)
         return {}
 
     def _save_manifest(self) -> None:
-        MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp = MANIFEST_PATH.with_suffix(".tmp")
+        self._manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._manifest_path.with_suffix(".tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(self._manifest, f, indent=2)
-        tmp.replace(MANIFEST_PATH)
+        tmp.replace(self._manifest_path)
 
     def _filter_new_ids(self, data_type: str, ids: list[str]) -> set[str]:
         known = set(self._manifest.get(data_type, {}).get("ids", []))
@@ -329,6 +355,6 @@ def _default_genres() -> list[str]:
 
 
 if __name__ == "__main__":
-    client = SpotifyIngestionClient()
+    client = SpotifyIngestionClient(bronze_dir=BRONZE_DIR)
     result = client.ingest()
     print("Ingestion summary:", result)

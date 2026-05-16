@@ -52,30 +52,39 @@ async def health(request: Request):
 async def recommendations(
     user_id: str,
     request: Request,
-    n: int | None = Query(default=None, ge=1, le=100),
+    n: int = Query(default=10, ge=1, le=100),
+    liked_track_ids: str | None = Query(default=None, pattern="^([a-zA-Z0-9]{22}(,[a-zA-Z0-9]{22})*)?$", description="Comma-separated list of Spotify track IDs (max 5)"),
 ):
     artifacts = getattr(request.app.state, "artifacts", None)
     if artifacts is None:
         raise HTTPException(status_code=503, detail="Model not loaded — run `python -m src.models.train` first")
 
-    if n is None:
-        n = getattr(request.app.state, "n_recommendations", 10)
     collab_weight: float = getattr(request.app.state, "collab_weight", 0.7)
+
+    # Parse liked_track_ids string into a list
+    parsed_liked_track_ids = [tid.strip() for tid in liked_track_ids.split(',')] if liked_track_ids else []
+    # Limit to 5 liked tracks for performance / relevance
+    parsed_liked_track_ids = parsed_liked_track_ids[:5]
+
     recs = _get_recs(
         user_id=user_id,
-        liked_track_ids=None,
+        liked_track_ids=parsed_liked_track_ids,
         artifacts=artifacts,
         n=n,
         collab_weight=collab_weight,
     )
 
-    track_map: dict = getattr(request.app.state, "track_map", {})
-    if track_map:
+    tracks_idx = getattr(request.app.state, "tracks_idx", None)
+    if tracks_idx is not None:
         meta_keys = ("name", "primary_artist_name", "primary_genre", "composite_popularity")
-        enriched = [
-            {**r, **{k: track_map.get(r["track_id"], {}).get(k) for k in meta_keys}}
-            for r in recs
-        ]
+        enriched = []
+        for r in recs:
+            try:
+                track_meta = tracks_idx.loc[r["track_id"]][list(meta_keys)].to_dict()
+                enriched.append({**r, **_serialize(track_meta)})
+            except KeyError:
+                logger.warning("Track ID %s not found in tracks_idx for enrichment", r["track_id"])
+                enriched.append(r) # Fallback to non-enriched if track not found
         return {"user_id": user_id, "count": len(enriched), "recommendations": enriched}
 
     return {"user_id": user_id, "count": len(recs), "recommendations": recs}

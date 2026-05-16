@@ -1,6 +1,7 @@
 import json
 import pytest
 import spotipy
+import requests # Added import
 from unittest.mock import MagicMock, patch
 
 import src.ingestion.spotify_client as spotify_module
@@ -15,10 +16,11 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(spotify_module, "MANIFEST_PATH", tmp_path / "bronze" / "manifest.json")
 
     with patch("src.ingestion.spotify_client.SpotifyClientCredentials"), \
-         patch("src.ingestion.spotify_client.spotipy.Spotify") as mock_sp_cls:
+         patch("src.ingestion.spotify_client.spotipy.Spotify") as mock_sp_cls, \
+         patch("src.ingestion.spotify_client.AzureBlobUploader"): # Mock AzureBlobUploader
         mock_sp = MagicMock()
         mock_sp_cls.return_value = mock_sp
-        c = SpotifyIngestionClient()
+        c = SpotifyIngestionClient(bronze_dir=tmp_path / "bronze")
         yield c, mock_sp, tmp_path
 
 
@@ -320,7 +322,7 @@ class TestFetchAudioFeaturesReccoBeats:
             if "/audio-features" not in url:
                 return lookup_resp
             if "rb1" in url:
-                raise Exception("network error")
+                raise requests.exceptions.RequestException("network error")
             return make_rb_audio_feature("rb2", "s2")
 
         c._call_rb = fake_call_rb
@@ -342,7 +344,7 @@ class TestFetchAudioFeaturesReccoBeats:
     # list rather than crashing the ingest run.
     def test_lookup_failure_returns_empty(self, client):
         c, _, _ = client
-        c._call_rb = MagicMock(side_effect=Exception("connection refused"))
+        c._call_rb = MagicMock(side_effect=requests.exceptions.RequestException("connection refused"))
         with patch("src.ingestion.spotify_client.time.sleep"):
             results = c._fetch_audio_features(["s1", "s2"])
         assert results == []

@@ -19,6 +19,10 @@ def load_artifacts(models_dir: Path | None = None) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"Model not found: {path} — run `python -m src.models.train` first")
     with open(path, "rb") as f:
+        # NOTE: pickle.load is not secure against corrupted or malicious data.
+        # For a portfolio project, we assume the model artifacts are generated
+        # by trusted processes. In production, consider safer serialization
+        # formats (e.g., joblib with checksums, ONNX) or integrity checks.
         return pickle.load(f)
 
 
