@@ -138,3 +138,11 @@ async def get_users(request: Request):
 
     user_ids = list(artifacts["collab"]["user_index"].keys())
     return {"user_ids": user_ids}
+
+
+@router.get("/tracks-all")
+async def get_all_track_ids(request: Request):
+    tracks_idx = getattr(request.app.state, "tracks_idx", None)
+    if tracks_idx is None:
+        raise HTTPException(status_code=503, detail="Track data not loaded")
+    return {"track_ids": tracks_idx.index.tolist()}

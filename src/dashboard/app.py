@@ -110,11 +110,39 @@ st.write("*(Distribution of audio features across your ingested tracks)*")
 
 # Placeholder for audio feature data - would fetch from API if available
 # For now, generate some dummy data or load from a sample
+@st.cache_data(ttl=3600) # Cache track IDs for an hour
+def fetch_track_ids():
+    tracks_data = fetch_data("tracks-all")
+    if tracks_data and "track_ids" in tracks_data:
+        return tracks_data["track_ids"]
+    return []
+
+
 try:
-    tracks_data = fetch_data("tracks/TRvQ4qB0D3X0j3J3G0J0J0") # Example track ID, replace with actual
-    if tracks_data and "audio_features" in tracks_data:
-        dummy_audio_features = pd.DataFrame([tracks_data["audio_features"]])
+    # Fetch all track IDs and pick one for demonstration
+    all_track_ids = fetch_track_ids()
+    if all_track_ids:
+        # Using the first track ID for consistency in demo
+        track_id_for_features = all_track_ids[0]
+        tracks_data = fetch_data(f"tracks/{track_id_for_features}")
+
+        if tracks_data and "audio_features" in tracks_data:
+            dummy_audio_features = pd.DataFrame([tracks_data["audio_features"]])
+        else:
+            # Fallback if specific track data or audio features are missing
+            st.warning(f"Could not fetch audio features for track ID: {track_id_for_features}. Showing dummy data.")
+            dummy_audio_features = pd.DataFrame({
+                "danceability": [0.7, 0.8, 0.6, 0.9],
+                "energy": [0.6, 0.7, 0.8, 0.5],
+                "valence": [0.5, 0.6, 0.7, 0.8],
+                "tempo": [120, 130, 110, 140],
+                "acousticness": [0.1, 0.2, 0.3, 0.05],
+                "instrumentalness": [0.01, 0.0, 0.02, 0.03],
+                "liveness": [0.15, 0.25, 0.1, 0.3],
+                "speechiness": [0.05, 0.03, 0.07, 0.04],
+            })
     else:
+        st.warning("No track IDs available from the API for audio feature visualization. Showing dummy data.")
         dummy_audio_features = pd.DataFrame({
             "danceability": [0.7, 0.8, 0.6, 0.9],
             "energy": [0.6, 0.7, 0.8, 0.5],
@@ -125,7 +153,8 @@ try:
             "liveness": [0.15, 0.25, 0.1, 0.3],
             "speechiness": [0.05, 0.03, 0.07, 0.04],
         })
-except Exception: # Fallback for when API is not running or track ID is invalid
+except requests.exceptions.RequestException as e:
+    st.error(f"Error fetching track IDs or audio features: {e}. Showing dummy data.")
     dummy_audio_features = pd.DataFrame({
         "danceability": [0.7, 0.8, 0.6, 0.9],
         "energy": [0.6, 0.7, 0.8, 0.5],
