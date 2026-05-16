@@ -1,3 +1,13 @@
+# To run this Streamlit application, follow these steps:
+# 1. Open a new terminal window and navigate to the root of your project.
+# 2. Start the FastAPI server by running the following command:
+#    bash -c "source .venv/bin/activate && PYTHONPATH=. uvicorn src/api/main:app --reload --host 0.0.0.0 --port 8001"
+#    Keep this terminal open and running in the background.
+# 3. Open another new terminal window and navigate to the root of your project.
+# 4. Run the Streamlit dashboard with the command:
+#    streamlit run src/dashboard/app.py
+#    This will open the dashboard in your web browser.
+
 import streamlit as st
 import pandas as pd
 import requests
@@ -5,7 +15,7 @@ import plotly.express as px
 from datetime import datetime, timedelta
 
 # Configuration
-API_BASE_URL = "http://localhost:8000" # Assuming local API for now
+API_BASE_URL = "http://localhost:8001" # Assuming local API for now
 
 st.set_page_config(layout="wide", page_title="MySpotify Insights Dashboard")
 
