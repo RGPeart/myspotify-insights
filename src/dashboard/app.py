@@ -66,7 +66,21 @@ st.markdown("---")
 
 st.header("🎶 User Recommendations (Live Demo)")
 
-user_id_example = st.text_input("Enter User ID (e.g., user_energetic)", "user_energetic")
+@st.cache_data(ttl=3600) # Cache user IDs for an hour
+def fetch_user_ids():
+    users_data = fetch_data("users")
+    if users_data and "user_ids" in users_data:
+        return sorted(users_data["user_ids"])
+    return []
+
+user_ids = fetch_user_ids()
+
+user_id_example = None
+if user_ids:
+    user_id_example = st.selectbox("Select User ID", options=user_ids, index=0)
+else:
+    st.warning("No user IDs available from the API. Please run the ETL and model training.")
+
 num_recs = st.slider("Number of Recommendations", min_value=1, max_value=20, value=10)
 
 if st.button("Get Recommendations"):

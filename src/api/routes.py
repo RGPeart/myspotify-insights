@@ -128,3 +128,13 @@ async def artist_detail(artist_id: str, request: Request):
         return artist
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Artist '{artist_id}' not found")
+
+
+@router.get("/users")
+async def get_users(request: Request):
+    artifacts = getattr(request.app.state, "artifacts", None)
+    if artifacts is None or "collab" not in artifacts:
+        raise HTTPException(status_code=503, detail="Collaborative model not loaded — run `python -m src.models.train` first")
+
+    user_ids = list(artifacts["collab"]["user_index"].keys())
+    return {"user_ids": user_ids}
