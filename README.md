@@ -125,9 +125,9 @@ feature/* → release → main
 
 Feature branches are opened against `release`. Once reviewed and merged to `release`, a consolidated PR moves the changes into `main`.
 
-## Claude Code Setup
+## Claude Code Setup (Optional)
 
-To use Claude Code with Google Gemini via LiteLLM:
+If you want to use Claude Code with Google Gemini via LiteLLM:
 
 1.  **Install LiteLLM:**
     ```bash
@@ -149,7 +149,7 @@ To use Claude Code with Google Gemini via LiteLLM:
     Obtain a Google Gemini API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
 
 4.  **Add API Key to .env:**
-    Add your Gemini API key to your `.env` file:
+    Uncomment the commented out lines, and add your Gemini API key to your `.env` file:
     ```
     GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
     ```
@@ -157,11 +157,11 @@ To use Claude Code with Google Gemini via LiteLLM:
 5. **Start the LiteLLM Proxy in your terminal:**
     Run the LiteLLM Proxy within it's own terminal to run alongside your Claude Code session:
     ```bash
-    litellm --config litellm_config.yaml --port 4000
+    litellm --config litellm_config.yml --port 4000
     ```
 
 6.  **Launch Claude Code in another terminal window:**
-    Run the following command in a separate, new terminal window to start using Claude Code with Google Geminia as the model:
+    Run the following command in a separate, new terminal window to start using Claude Code with Google Gemini as the model:
     ```bash
     set -a && source .env && set +a 
     claude

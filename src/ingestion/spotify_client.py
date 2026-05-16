@@ -187,6 +187,10 @@ class SpotifyIngestionClient:
         The returned records use the original Spotify track ID as "id" so the
         existing bronze → silver transform requires no changes.
         """
+        # Short-circuit if no track IDs provided, to avoid unnecessary ReccoBeats calls and log noise.
+        if len(track_ids) == 0:
+            return []
+        
         # Step 1: resolve Spotify IDs → ReccoBeats IDs (max 40 per request)
         rb_id_map: dict[str, str] = {}  # spotify_id → reccobeats_id
         for batch in _batched(track_ids, 40):

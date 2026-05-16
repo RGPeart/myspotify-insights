@@ -24,7 +24,7 @@ async def lifespan(app: FastAPI):
         from src.models.predict import load_artifacts
         app.state.artifacts = load_artifacts(models_dir)
         logger.info("Recommendation model loaded")
-    except (FileNotFoundError, Exception) as exc:
+    except Exception as exc:
         logger.warning("Model artifacts not found or invalid (%s) — /recommendations will return 503", exc)
         app.state.artifacts = None
 
