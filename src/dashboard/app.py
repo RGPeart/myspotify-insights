@@ -60,7 +60,7 @@ rec_metrics_data = {
     "Value": [0.25, 3.5, 0.85], # Placeholder values
     "Target": ["> 0.20", "> 3 genres", "> 80%"]
 }
-st.dataframe(pd.DataFrame(rec_metrics_data), use_container_width=True)
+st.dataframe(pd.DataFrame(rec_metrics_data), width='stretch')
 
 st.markdown("---")
 
@@ -89,7 +89,7 @@ if st.button("Get Recommendations"):
         if recommendations and recommendations["recommendations"]:
             st.subheader(f"Recommendations for {user_id_example}")
             recs_df = pd.DataFrame(recommendations["recommendations"])
-            st.dataframe(recs_df, use_container_width=True)
+            st.dataframe(recs_df, width='strectch')
 
             # Display track details for one recommendation
             if not recs_df.empty:
@@ -172,7 +172,7 @@ if not dummy_audio_features.empty:
         options=dummy_audio_features.columns.tolist()
     )
     fig = px.histogram(dummy_audio_features, x=feature_to_plot, title=f"Distribution of {feature_to_plot}")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 st.markdown("---")
 
@@ -184,7 +184,7 @@ dq_data = {
     "Status": ["PASS", "PASS", "FAIL"], # Placeholder
     "Details": ["0 nulls", "100% valid", "5 duplicates"]
 }
-st.dataframe(pd.DataFrame(dq_data), use_container_width=True)
+st.dataframe(pd.DataFrame(dq_data), width='stretch')
 
 st.write(f"Last Pipeline Run: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (Placeholder)")
 st.write(f"Data Freshness: {timedelta(days=1)} (Placeholder)")
