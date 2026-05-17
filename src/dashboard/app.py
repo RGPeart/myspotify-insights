@@ -37,21 +37,26 @@ def fetch_data(endpoint: str, params: dict = None):
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching data from API endpoint /{endpoint}: {e}")
         return None
 
 @st.cache_data(ttl=3600) # Cache user IDs for an hour
 def fetch_user_ids():
     users_data = fetch_data("users")
-    if users_data and "user_ids" in users_data:
-        return sorted(users_data["user_ids"])
+    if users_data:
+        if "user_ids" in users_data:
+            return sorted(users_data["user_ids"])
+        else:
+            st.error("API response for /users is missing 'user_ids'.")
     return []
 
 @st.cache_data(ttl=3600) # Cache track IDs for an hour
 def fetch_track_ids():
     tracks_data = fetch_data("tracks/ids")
-    if tracks_data and "track_ids" in tracks_data:
-        return tracks_data["track_ids"]
+    if tracks_data:
+        if "track_ids" in tracks_data:
+            return tracks_data["track_ids"]
+        else:
+            st.error("API response for /tracks/ids is missing 'track_ids'.")
     return []
 
 # -----------------------------------------------------------------------------
@@ -67,7 +72,10 @@ with col1:
 with col2:
     st.metric("Total Artists in Gold", "N/A", help="Run the ETL pipeline to populate this value")
 with col3:
-    st.metric("API Health", "OK" if fetch_data("health") else "DOWN", help="Status of the FastAPI service")
+    api_health_data = fetch_data("health")
+    st.metric("API Health", "OK" if api_health_data else "DOWN", help="Status of the FastAPI service")
+    if not api_health_data:
+        st.error(f"Error fetching API health data. API may be down or unreachable.")
 
 st.markdown("---")
 
@@ -98,27 +106,32 @@ num_recs = st.slider("Number of Recommendations", min_value=1, max_value=20, val
 if st.button("Get Recommendations"):
     if user_id_example:
         recommendations = fetch_data(f"recommendations/{user_id_example}", params={"n": num_recs})
-        if recommendations and recommendations["recommendations"]:
-            st.subheader(f"Recommendations for {user_id_example}")
-            recs_df = pd.DataFrame(recommendations["recommendations"])
-            st.dataframe(recs_df, use_container_width=True)
+        if recommendations:
+            if recommendations["recommendations"]:
+                st.subheader(f"Recommendations for {user_id_example}")
+                recs_df = pd.DataFrame(recommendations["recommendations"])
+                st.dataframe(recs_df, use_container_width=True)
 
-            # Display track details for one recommendation
-            if not recs_df.empty:
-                first_track_id = recs_df.iloc[0]["track_id"]
-                st.subheader(f"Details for first recommendation ({first_track_id})")
-                track_detail = fetch_data(f"tracks/{first_track_id}")
-                if track_detail:
-                    st.json(track_detail)
+                # Display track details for one recommendation
+                if not recs_df.empty:
+                    first_track_id = recs_df.iloc[0]["track_id"]
+                    st.subheader(f"Details for first recommendation ({first_track_id})")
+                    track_detail = fetch_data(f"tracks/{first_track_id}")
+                    if track_detail:
+                        st.json(track_detail)
+                    else:
+                        st.error(f"Error fetching details for track ID: {first_track_id}")
+            else:
+                st.info(f"No recommendations found for user ID: {user_id_example}")
         else:
-            st.info(f"No recommendations found for user ID: {user_id_example}")
+            st.error(f"Error fetching recommendations for user ID: {user_id_example}")
     else:
-        st.warning("Please enter a User ID.")
+        st.warning("Please select a User ID.")
 
 st.markdown("---")
 
-st.header("🔊 Audio Feature Distributions")
-st.write("*(Distribution of audio features across your ingested tracks)*")
+st.header("🔊 Audio Features for a Sample Track")
+st.write("*(Audio features for a single track from your ingested data)*")
 
 all_track_ids = fetch_track_ids()
 
@@ -126,10 +139,14 @@ audio_features_df = pd.DataFrame() # Initialize an empty DataFrame
 if all_track_ids:
     track_id_for_features = all_track_ids[0] # Using the first track ID for consistency in demo
     tracks_data = fetch_data(f"tracks/{track_id_for_features}")
-    if tracks_data and "audio_features" in tracks_data:
-        audio_features_df = pd.DataFrame([tracks_data["audio_features"]])
+    if tracks_data:
+        if "audio_features" in tracks_data:
+            audio_features_df = pd.DataFrame([tracks_data["audio_features"]])
+        else:
+            st.error(f"API response for /tracks/{{track_id}} is missing 'audio_features' for track ID: {track_id_for_features}. Showing dummy data.")
+            audio_features_df = _DUMMY_AUDIO_FEATURES_DF.copy()
     else:
-        st.warning(f"Could not fetch audio features for track ID: {track_id_for_features}. Showing dummy data.")
+        st.error(f"Error fetching audio features for track ID: {track_id_for_features}. Showing dummy data.")
         audio_features_df = _DUMMY_AUDIO_FEATURES_DF.copy()
 else:
     st.warning("No track IDs available from the API for audio feature visualization. Showing dummy data.")
