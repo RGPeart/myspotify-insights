@@ -4,7 +4,7 @@
 **Version:** 1.0  
 **Author:** Ryan Peart  
 **Last Updated:** May 12, 2026  
-**Status:** Draft
+**Status:** In Progress
 
 ---
 
@@ -98,7 +98,7 @@ A full-stack data product that:
 
 **Data Sources:**
 - Spotify Web API endpoints: tracks, artists, audio features, genres
-- Sample user listening history (simulated or personal Spotify data)
+- Personal Spotify listening history
 
 ---
 
@@ -108,9 +108,9 @@ A full-stack data product that:
 **Technical Details:**
 - **Bronze → Silver:** Clean and normalize JSON data
 - **Silver → Gold:** Create dimensional models (fact_listening_history, dim_tracks, dim_artists)
-- Orchestration via Airflow (Docker) or Prefect
+- Orchestration via Airflow
 - Data quality tests: null checks, schema validation, duplicate detection
-- Store processed data in Azure SQL Database (free tier) or Parquet files
+- Store processed data in Parquet files with DuckDB integration
 
 **Transformations:**
 - Audio feature normalization (scale 0-1)
@@ -129,6 +129,7 @@ A full-stack data product that:
 - **Features:** danceability, energy, valence, tempo, genre similarity, artist popularity
 - **Output:** Top 10 recommended tracks per user with confidence scores
 - Model retraining schedule (weekly batch job)
+- **Data Volume:** Target 1,000+ tracks of historical data for recommendations.
 
 **Recommendation Logic:**
 - Hybrid approach: 70% collaborative filtering, 30% content similarity
@@ -165,6 +166,8 @@ A full-stack data product that:
 
 **Technology:**
 - Streamlit or React + Chart.js
+- User feedback loop for recommendation ratings
+- Real user authentication via Spotify
 - Deployed on Streamlit Community Cloud or Azure Static Web Apps (free)
 
 ---
@@ -235,31 +238,10 @@ A full-stack data product that:
 ## 7. Open Questions
 
 ### Technical Decisions
-1. **Q:** Should we use Airflow (more popular) or Prefect (easier setup) for orchestration?  
-   **Status:** Lean toward Airflow for resume value, but Prefect if setup becomes blocker
-
-2. **Q:** Azure SQL Database (free tier) vs. DuckDB (file-based) for storage?  
-   **Status:** Start with Parquet + DuckDB for cost, migrate to Azure SQL if needed
-
-3. **Q:** How much historical data to collect before building recommendations?  
-   **Status:** Target 1,000+ tracks and 10,000+ listening events (can simulate)
 
 ### Scope Questions
-4. **Q:** Should we include a "feedback loop" where users rate recommendations?  
-   **Status:** Nice-to-have for Phase 2, not MVP
-
-5. **Q:** Do we need real user authentication or can demo use hard-coded sample users?  
-   **Status:** Use sample users for MVP, document as future enhancement
-
-6. **Q:** Should the dashboard be public or password-protected?  
-   **Status:** Public demo is better for portfolio accessibility
 
 ### Data Questions
-7. **Q:** Can we use personal Spotify listening history or need to simulate user data?  
-   **Status:** Investigate Spotify API permissions, fallback to simulated data
-
-8. **Q:** What's the minimum viable dataset size to show credible recommendations?  
-   **Status:** 500 tracks x 5 users = 2,500 interactions minimum
 
 ---
 
@@ -329,7 +311,7 @@ A full-stack data product that:
 
 ### Tech Stack Summary
 - **Cloud:** Azure (Blob Storage, Functions, App Service, SQL Database)
-- **Orchestration:** Airflow or Prefect
+- **Orchestration:** Airflow
 - **Processing:** Python (pandas, polars)
 - **ML:** Scikit-learn, Surprise (collaborative filtering)
 - **API:** FastAPI
