@@ -40,16 +40,23 @@ def dag_module():
     ingestion_mod.SpotifyIngestionClient = MagicMock(return_value=mock_client)
     sys.modules["src.ingestion.spotify_client"] = ingestion_mod
 
+    # The DAG tasks use lazy imports (`from src.etl import bronze_to_silver` inside
+    # the function body). Python resolves `from package import submodule` via the
+    # package object's attribute, not sys.modules, when the package is already loaded
+    # (which happens when pytest collects test_etl.py before test_dag.py runs).
+    # Patching sys.modules alone is not enough — we must also set the attribute on
+    # the already-loaded src.etl package so the lazy imports hit the mocks.
+    import src.etl as _etl_pkg
+    _etl_b2s_orig = getattr(_etl_pkg, "bronze_to_silver", None)
+    _etl_s2g_orig = getattr(_etl_pkg, "silver_to_gold", None)
+    _etl_pkg.bronze_to_silver = b2s_mod
+    _etl_pkg.silver_to_gold = s2g_mod
+
     dag_path = pathlib.Path(__file__).parent.parent / "dags" / "spotify_etl_dag.py"
     spec = importlib.util.spec_from_file_location("spotify_etl_dag", dag_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
-    # The DAG file does `from src.etl import bronze_to_silver, silver_to_gold`.
-    # If those packages were already loaded before this fixture ran (which happens
-    # when pytest collects test_etl.py), `from X import Y` picks up the package's
-    # cached attribute instead of sys.modules. Overwrite the DAG module's globals
-    # directly so task functions always call our mocks.
     mod.bronze_to_silver = b2s_mod
     mod.silver_to_gold = s2g_mod
     mod.SpotifyIngestionClient = ingestion_mod.SpotifyIngestionClient
@@ -61,6 +68,16 @@ def dag_module():
             sys.modules.pop(key, None)
         else:
             sys.modules[key] = original
+
+    if _etl_b2s_orig is not None:
+        _etl_pkg.bronze_to_silver = _etl_b2s_orig
+    elif hasattr(_etl_pkg, "bronze_to_silver"):
+        delattr(_etl_pkg, "bronze_to_silver")
+
+    if _etl_s2g_orig is not None:
+        _etl_pkg.silver_to_gold = _etl_s2g_orig
+    elif hasattr(_etl_pkg, "silver_to_gold"):
+        delattr(_etl_pkg, "silver_to_gold")
 
 
 # ---------------------------------------------------------------------------
