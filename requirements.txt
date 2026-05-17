@@ -10,8 +10,8 @@ pandas>=2.1.4
 numpy>=1.26.2
 pyarrow>=22.0.0
 
-# Optional orchestration — install manually: pip install "prefect>=3.0"
-# prefect>=3.0
+# Orchestration
+apache-airflow>=3.0.0
 
 # Azure SDK
 azure-storage-blob>=12.19.0
