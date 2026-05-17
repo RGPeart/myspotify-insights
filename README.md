@@ -70,25 +70,34 @@ cp .env.example .env
 ### Running the pipeline
 
 ```bash
-# 1. Ingest raw data from Spotify API → data/bronze/
-python -m src.ingestion.spotify_client
+# 1. Set up and run Airflow (using Docker Compose)
+# Ensure Docker is running.
+# Create a dags directory if it doesn't exist and copy the DAG file to your Airflow DAGs folder (e.g., ./dags/spotify_etl_dag.py)
+# From the project root, navigate into the 'airflow' directory:
+# cd airflow
+# Initialize the Airflow database and create a user (first time only):
+# docker compose up airflow-init
+# Start Airflow services:
+# docker compose up -d
+# Access Airflow UI at http://localhost:8080 (default credentials: airflow/airflow)
+# Unpause the 'spotify_etl_pipeline' DAG and trigger it manually or await schedule.
 
-# 2. Bronze → Silver (clean, normalize, validate)
-python -m src.etl.bronze_to_silver
+# 2. Ingest raw data from Spotify API → data/bronze/
+#    (Orchestrated by Airflow: Trigger the 'spotify_etl_pipeline' DAG in Airflow UI)
 
-# 3. Silver → Gold (dimensional model, composite popularity scores)
-python -m src.etl.silver_to_gold
+# 3. Bronze → Silver (clean, normalize, validate)
+#    (Orchestrated by Airflow: Trigger the 'spotify_etl_pipeline' DAG in Airflow UI)
 
-# Or run the full pipeline in one step (with optional Prefect orchestration)
-python -m src.etl.pipeline
+# 4. Silver → Gold (dimensional model, composite popularity scores)
+#    (Orchestrated by Airflow: Trigger the 'spotify_etl_pipeline' DAG in Airflow UI)
 
-# 4. Train recommendation model
+# 5. Train recommendation model
 python -m src.models.train
 
-# 5. Start API server (in a dedicated terminal)
+# 6. Start API server (in a dedicated terminal)
 bash -c "source .venv/bin/activate && PYTHONPATH=. uvicorn src/api/main:app --reload --host 0.0.0.0 --port 8001"
 
-# 6. Start dashboard (in another dedicated terminal)
+# 7. Start dashboard (in another dedicated terminal)
 streamlit run src/dashboard/app.py
 ```
 
