@@ -177,4 +177,115 @@ st.write(f"Last Pipeline Run: N/A (Placeholder)")
 st.write(f"Data Freshness: 1 day (Placeholder)")
 
 st.markdown("---")
+
+# -----------------------------------------------------------------------------
+# Data Lineage Graph (Marquez)
+# -----------------------------------------------------------------------------
+
+MARQUEZ_URL = os.getenv("MARQUEZ_URL", "http://localhost:5000")
+MARQUEZ_NAMESPACE = os.getenv("OPENLINEAGE_NAMESPACE", "myspotify-insights")
+
+st.header("🔗 Data Lineage")
+st.write(
+    "Pipeline lineage tracked via [OpenLineage](https://openlineage.io) and "
+    "[Marquez](https://marquezproject.ai). "
+    f"Marquez UI: `{MARQUEZ_URL.replace('5000', '3000')}`"
+)
+
+# Static pipeline topology (always shown)
+st.subheader("Pipeline Topology")
+st.graphviz_chart("""
+digraph pipeline {
+    rankdir=LR;
+    node [fontname="Helvetica", fontsize=11]
+    edge [fontsize=10]
+
+    "Spotify API" [shape=cylinder, style=filled, fillcolor="#a8d8ea"]
+
+    "bronze/tracks"         [shape=note, style=filled, fillcolor="#ffe082", label="bronze/\\ntracks.json"]
+    "bronze/artists"        [shape=note, style=filled, fillcolor="#ffe082", label="bronze/\\nartists.json"]
+    "bronze/audio_features" [shape=note, style=filled, fillcolor="#ffe082", label="bronze/\\naudio_features.json"]
+
+    "silver/tracks"   [shape=note, style=filled, fillcolor="#c8e6c9", label="silver/\\ntracks.parquet"]
+    "silver/artists"  [shape=note, style=filled, fillcolor="#c8e6c9", label="silver/\\nartists.parquet"]
+
+    "gold/dim_tracks"   [shape=note, style=filled, fillcolor="#b2dfdb", label="gold/\\ndim_tracks.parquet"]
+    "gold/dim_artists"  [shape=note, style=filled, fillcolor="#b2dfdb", label="gold/\\ndim_artists.parquet"]
+    "gold/fact_history" [shape=note, style=filled, fillcolor="#b2dfdb", label="gold/\\nfact_listening_history.parquet"]
+
+    "_ingest_data"       [shape=box, style=filled, fillcolor="#f8bbd0", label="_ingest_data\\n(Airflow task)"]
+    "_bronze_to_silver"  [shape=box, style=filled, fillcolor="#f8bbd0", label="_bronze_to_silver\\n(Airflow task)"]
+    "_silver_to_gold"    [shape=box, style=filled, fillcolor="#f8bbd0", label="_silver_to_gold\\n(Airflow task)"]
+    "recommendations_api" [shape=component, style=filled, fillcolor="#ce93d8", label="Recommendations\\nAPI"]
+
+    "Spotify API" -> "_ingest_data"
+    "_ingest_data" -> "bronze/tracks"
+    "_ingest_data" -> "bronze/artists"
+    "_ingest_data" -> "bronze/audio_features"
+
+    "bronze/tracks"         -> "_bronze_to_silver"
+    "bronze/artists"        -> "_bronze_to_silver"
+    "bronze/audio_features" -> "_bronze_to_silver"
+    "_bronze_to_silver" -> "silver/tracks"
+    "_bronze_to_silver" -> "silver/artists"
+
+    "silver/tracks"  -> "_silver_to_gold"
+    "silver/artists" -> "_silver_to_gold"
+    "_silver_to_gold" -> "gold/dim_tracks"
+    "_silver_to_gold" -> "gold/dim_artists"
+    "_silver_to_gold" -> "gold/fact_history"
+
+    "gold/dim_tracks"   -> "recommendations_api"
+    "gold/dim_artists"  -> "recommendations_api"
+    "gold/fact_history" -> "recommendations_api"
+}
+""")
+
+# Live Marquez dataset/job counts (shown only when Marquez is running)
+st.subheader("Live Lineage (Marquez)")
+with st.spinner("Querying Marquez..."):
+    try:
+        marquez_resp = requests.get(
+            f"{MARQUEZ_URL}/api/v1/namespaces/{MARQUEZ_NAMESPACE}/jobs",
+            timeout=3,
+        )
+        marquez_resp.raise_for_status()
+        jobs = marquez_resp.json().get("jobs", [])
+
+        dataset_resp = requests.get(
+            f"{MARQUEZ_URL}/api/v1/namespaces/{MARQUEZ_NAMESPACE}/datasets",
+            timeout=3,
+        )
+        dataset_resp.raise_for_status()
+        datasets = dataset_resp.json().get("datasets", [])
+
+        col_j, col_d = st.columns(2)
+        with col_j:
+            st.metric("Tracked Jobs", len(jobs))
+        with col_d:
+            st.metric("Tracked Datasets", len(datasets))
+
+        if jobs:
+            jobs_df = pd.DataFrame([
+                {
+                    "job": j.get("name"),
+                    "namespace": j.get("namespace", {}).get("name", ""),
+                    "latest_run": j.get("latestRun", {}).get("state", "N/A") if j.get("latestRun") else "N/A",
+                    "updated_at": j.get("updatedAt", "N/A"),
+                }
+                for j in jobs
+            ])
+            st.dataframe(jobs_df, use_container_width=True)
+        else:
+            st.info("No jobs tracked yet. Trigger the Airflow DAG to populate lineage.")
+
+    except requests.exceptions.ConnectionError:
+        st.info(
+            "Marquez is not running. Start it with: "
+            "`docker compose --profile lineage up -d marquez marquez-web`"
+        )
+    except Exception as e:
+        st.warning(f"Could not reach Marquez: {e}")
+
+st.markdown("---")
 st.caption("Built with Streamlit and FastAPI. Data from Spotify & ReccoBeats.")
