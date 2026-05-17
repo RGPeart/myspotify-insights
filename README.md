@@ -111,10 +111,10 @@ pytest tests/test_etl.py::TestBronzeToSilverRun::test_run_end_to_end
 |---|---|---|
 | Project setup & PRD | Done | `main` |
 | Feature 1: Spotify API ingestion | Done | `main` |
-| Feature 2: ETL pipeline (Bronze → Silver → Gold) | In review | PR #9 |
-| Feature 3: Recommendation model | Planned | — |
-| Feature 4: FastAPI service | Planned | — |
-| Feature 5: Streamlit dashboard | Planned | — |
+| Feature 2: ETL pipeline (Bronze → Silver → Gold) | Done | `main` |
+| Feature 3: Recommendation model | Done | `main` |
+| Feature 4: FastAPI service | Done | `main` |
+| Feature 5: Streamlit dashboard | Done | `main` |
 | Feature 6: CI/CD & cloud deployment | Planned | — |
 
 ## Branching Strategy
