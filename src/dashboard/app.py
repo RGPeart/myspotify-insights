@@ -1,21 +1,26 @@
-# To run this Streamlit application, follow these steps:
-# 1. Open a new terminal window and navigate to the root of your project.
-# 2. Start the FastAPI server by running the following command:
-#    bash -c "source .venv/bin/activate && PYTHONPATH=. uvicorn src/api/main:app --reload --host 0.0.0.0 --port 8001"
-#    Keep this terminal open and running in the background.
-# 3. Open another new terminal window and navigate to the root of your project.
-# 4. Run the Streamlit dashboard with the command:
-#    streamlit run src/dashboard/app.py
-#    This will open the dashboard in your web browser.
+# See README.md for instructions on how to run this Streamlit application.
 
 import streamlit as st
 import pandas as pd
 import requests
 import plotly.express as px
-from datetime import datetime, timedelta
+import os
+from datetime import datetime
 
 # Configuration
-API_BASE_URL = "http://localhost:8001" # Assuming local API for now
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001")
+
+# --- Constants ---
+_DUMMY_AUDIO_FEATURES_DF = pd.DataFrame({
+    "danceability": [0.7, 0.8, 0.6, 0.9],
+    "energy": [0.6, 0.7, 0.8, 0.5],
+    "valence": [0.5, 0.6, 0.7, 0.8],
+    "tempo": [120, 130, 110, 140],
+    "acousticness": [0.1, 0.2, 0.3, 0.05],
+    "instrumentalness": [0.01, 0.0, 0.02, 0.03],
+    "liveness": [0.15, 0.25, 0.1, 0.3],
+    "speechiness": [0.05, 0.03, 0.07, 0.04],
+})
 
 st.set_page_config(layout="wide", page_title="MySpotify Insights Dashboard")
 
@@ -35,6 +40,20 @@ def fetch_data(endpoint: str, params: dict = None):
         st.error(f"Error fetching data from API endpoint /{endpoint}: {e}")
         return None
 
+@st.cache_data(ttl=3600) # Cache user IDs for an hour
+def fetch_user_ids():
+    users_data = fetch_data("users")
+    if users_data and "user_ids" in users_data:
+        return sorted(users_data["user_ids"])
+    return []
+
+@st.cache_data(ttl=3600) # Cache track IDs for an hour
+def fetch_track_ids():
+    tracks_data = fetch_data("tracks/ids")
+    if tracks_data and "track_ids" in tracks_data:
+        return tracks_data["track_ids"]
+    return []
+
 # -----------------------------------------------------------------------------
 # Dashboard Sections
 # -----------------------------------------------------------------------------
@@ -44,9 +63,9 @@ st.header("📈 Overall Metrics")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    st.metric("Total Tracks in Gold", "N/A", "Update ETL") # Placeholder
+    st.metric("Total Tracks in Gold", "N/A", help="Run the ETL pipeline to populate this value")
 with col2:
-    st.metric("Total Artists in Gold", "N/A", "Update ETL") # Placeholder
+    st.metric("Total Artists in Gold", "N/A", help="Run the ETL pipeline to populate this value")
 with col3:
     st.metric("API Health", "OK" if fetch_data("health") else "DOWN", help="Status of the FastAPI service")
 
@@ -60,18 +79,11 @@ rec_metrics_data = {
     "Value": [0.25, 3.5, 0.85], # Placeholder values
     "Target": ["> 0.20", "> 3 genres", "> 80%"]
 }
-st.dataframe(pd.DataFrame(rec_metrics_data), width='stretch')
+st.dataframe(pd.DataFrame(rec_metrics_data), use_container_width=True)
 
 st.markdown("---")
 
 st.header("🎶 User Recommendations (Live Demo)")
-
-@st.cache_data(ttl=3600) # Cache user IDs for an hour
-def fetch_user_ids():
-    users_data = fetch_data("users")
-    if users_data and "user_ids" in users_data:
-        return sorted(users_data["user_ids"])
-    return []
 
 user_ids = fetch_user_ids()
 
@@ -89,7 +101,7 @@ if st.button("Get Recommendations"):
         if recommendations and recommendations["recommendations"]:
             st.subheader(f"Recommendations for {user_id_example}")
             recs_df = pd.DataFrame(recommendations["recommendations"])
-            st.dataframe(recs_df, width='strectch')
+            st.dataframe(recs_df, use_container_width=True)
 
             # Display track details for one recommendation
             if not recs_df.empty:
@@ -108,71 +120,29 @@ st.markdown("---")
 st.header("🔊 Audio Feature Distributions")
 st.write("*(Distribution of audio features across your ingested tracks)*")
 
-# Placeholder for audio feature data - would fetch from API if available
-# For now, generate some dummy data or load from a sample
-@st.cache_data(ttl=3600) # Cache track IDs for an hour
-def fetch_track_ids():
-    tracks_data = fetch_data("tracks-all")
-    if tracks_data and "track_ids" in tracks_data:
-        return tracks_data["track_ids"]
-    return []
+all_track_ids = fetch_track_ids()
 
-
-try:
-    # Fetch all track IDs and pick one for demonstration
-    all_track_ids = fetch_track_ids()
-    if all_track_ids:
-        # Using the first track ID for consistency in demo
-        track_id_for_features = all_track_ids[0]
-        tracks_data = fetch_data(f"tracks/{track_id_for_features}")
-
-        if tracks_data and "audio_features" in tracks_data:
-            dummy_audio_features = pd.DataFrame([tracks_data["audio_features"]])
-        else:
-            # Fallback if specific track data or audio features are missing
-            st.warning(f"Could not fetch audio features for track ID: {track_id_for_features}. Showing dummy data.")
-            dummy_audio_features = pd.DataFrame({
-                "danceability": [0.7, 0.8, 0.6, 0.9],
-                "energy": [0.6, 0.7, 0.8, 0.5],
-                "valence": [0.5, 0.6, 0.7, 0.8],
-                "tempo": [120, 130, 110, 140],
-                "acousticness": [0.1, 0.2, 0.3, 0.05],
-                "instrumentalness": [0.01, 0.0, 0.02, 0.03],
-                "liveness": [0.15, 0.25, 0.1, 0.3],
-                "speechiness": [0.05, 0.03, 0.07, 0.04],
-            })
+audio_features_df = pd.DataFrame() # Initialize an empty DataFrame
+if all_track_ids:
+    track_id_for_features = all_track_ids[0] # Using the first track ID for consistency in demo
+    tracks_data = fetch_data(f"tracks/{track_id_for_features}")
+    if tracks_data and "audio_features" in tracks_data:
+        audio_features_df = pd.DataFrame([tracks_data["audio_features"]])
     else:
-        st.warning("No track IDs available from the API for audio feature visualization. Showing dummy data.")
-        dummy_audio_features = pd.DataFrame({
-            "danceability": [0.7, 0.8, 0.6, 0.9],
-            "energy": [0.6, 0.7, 0.8, 0.5],
-            "valence": [0.5, 0.6, 0.7, 0.8],
-            "tempo": [120, 130, 110, 140],
-            "acousticness": [0.1, 0.2, 0.3, 0.05],
-            "instrumentalness": [0.01, 0.0, 0.02, 0.03],
-            "liveness": [0.15, 0.25, 0.1, 0.3],
-            "speechiness": [0.05, 0.03, 0.07, 0.04],
-        })
-except requests.exceptions.RequestException as e:
-    st.error(f"Error fetching track IDs or audio features: {e}. Showing dummy data.")
-    dummy_audio_features = pd.DataFrame({
-        "danceability": [0.7, 0.8, 0.6, 0.9],
-        "energy": [0.6, 0.7, 0.8, 0.5],
-        "valence": [0.5, 0.6, 0.7, 0.8],
-        "tempo": [120, 130, 110, 140],
-        "acousticness": [0.1, 0.2, 0.3, 0.05],
-        "instrumentalness": [0.01, 0.0, 0.02, 0.03],
-        "liveness": [0.15, 0.25, 0.1, 0.3],
-        "speechiness": [0.05, 0.03, 0.07, 0.04],
-    })
+        st.warning(f"Could not fetch audio features for track ID: {track_id_for_features}. Showing dummy data.")
+        audio_features_df = _DUMMY_AUDIO_FEATURES_DF.copy()
+else:
+    st.warning("No track IDs available from the API for audio feature visualization. Showing dummy data.")
+    audio_features_df = _DUMMY_AUDIO_FEATURES_DF.copy()
 
-if not dummy_audio_features.empty:
+
+if not audio_features_df.empty:
     feature_to_plot = st.selectbox(
         "Select Audio Feature to Visualize",
-        options=dummy_audio_features.columns.tolist()
+        options=audio_features_df.columns.tolist()
     )
-    fig = px.histogram(dummy_audio_features, x=feature_to_plot, title=f"Distribution of {feature_to_plot}")
-    st.plotly_chart(fig, width='stretch')
+    fig = px.histogram(audio_features_df, x=feature_to_plot, title=f"Distribution of {feature_to_plot}")
+    st.plotly_chart(fig, use_container_width=True)
 
 st.markdown("---")
 
@@ -184,10 +154,10 @@ dq_data = {
     "Status": ["PASS", "PASS", "FAIL"], # Placeholder
     "Details": ["0 nulls", "100% valid", "5 duplicates"]
 }
-st.dataframe(pd.DataFrame(dq_data), width='stretch')
+st.dataframe(pd.DataFrame(dq_data), use_container_width=True)
 
-st.write(f"Last Pipeline Run: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (Placeholder)")
-st.write(f"Data Freshness: {timedelta(days=1)} (Placeholder)")
+st.write(f"Last Pipeline Run: N/A (Placeholder)")
+st.write(f"Data Freshness: 1 day (Placeholder)")
 
 st.markdown("---")
 st.caption("Built with Streamlit and FastAPI. Data from Spotify & ReccoBeats.")
