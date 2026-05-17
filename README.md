@@ -11,7 +11,7 @@ MySpotify Insights demonstrates production-grade data engineering practices by b
 - Serves recommendations via a REST API
 - Visualizes insights through an interactive dashboard
 
-**Tech Stack:** Python | Azure Blob Storage | FastAPI | Scikit-learn | Streamlit | Prefect (optional)
+**Tech Stack:** Python | Apache Airflow | Azure Blob Storage | FastAPI | Scikit-learn | Streamlit
 
 ## Architecture
 
@@ -70,25 +70,31 @@ cp .env.example .env
 ### Running the pipeline
 
 ```bash
-# 1. Ingest raw data from Spotify API → data/bronze/
-python -m src.ingestion.spotify_client
+# 1. Set up and run Airflow (using Docker Compose)
+# Ensure Docker is running.
+# From the project root, initialize the Airflow database and create a user (first time only):
+# docker compose up airflow-init
+# Start Airflow services:
+# docker compose up -d
+# Access Airflow UI at http://localhost:8080 (default credentials: airflow/airflow)
+# Unpause the 'spotify_etl_pipeline' DAG and trigger it manually or await schedule.
 
-# 2. Bronze → Silver (clean, normalize, validate)
-python -m src.etl.bronze_to_silver
+# 2. Ingest raw data from Spotify API → data/bronze/
+#    (Orchestrated by Airflow: Trigger the 'spotify_etl_pipeline' DAG in Airflow UI)
 
-# 3. Silver → Gold (dimensional model, composite popularity scores)
-python -m src.etl.silver_to_gold
+# 3. Bronze → Silver (clean, normalize, validate)
+#    (Orchestrated by Airflow: Trigger the 'spotify_etl_pipeline' DAG in Airflow UI)
 
-# Or run the full pipeline in one step (with optional Prefect orchestration)
-python -m src.etl.pipeline
+# 4. Silver → Gold (dimensional model, composite popularity scores)
+#    (Orchestrated by Airflow: Trigger the 'spotify_etl_pipeline' DAG in Airflow UI)
 
-# 4. Train recommendation model
+# 5. Train recommendation model
 python -m src.models.train
 
-# 5. Start API server (in a dedicated terminal)
+# 6. Start API server (in a dedicated terminal)
 bash -c "source .venv/bin/activate && PYTHONPATH=. uvicorn src/api/main:app --reload --host 0.0.0.0 --port 8001"
 
-# 6. Start dashboard (in another dedicated terminal)
+# 7. Start dashboard (in another dedicated terminal)
 streamlit run src/dashboard/app.py
 ```
 
@@ -111,10 +117,10 @@ pytest tests/test_etl.py::TestBronzeToSilverRun::test_run_end_to_end
 |---|---|---|
 | Project setup & PRD | Done | `main` |
 | Feature 1: Spotify API ingestion | Done | `main` |
-| Feature 2: ETL pipeline (Bronze → Silver → Gold) | In review | PR #9 |
-| Feature 3: Recommendation model | Planned | — |
-| Feature 4: FastAPI service | Planned | — |
-| Feature 5: Streamlit dashboard | Planned | — |
+| Feature 2: ETL pipeline (Bronze → Silver → Gold) | Done | `main` |
+| Feature 3: Recommendation model | Done | `main` |
+| Feature 4: FastAPI service | Done | `main` |
+| Feature 5: Streamlit dashboard | Done | `main` |
 | Feature 6: CI/CD & cloud deployment | Planned | — |
 
 ## Branching Strategy
