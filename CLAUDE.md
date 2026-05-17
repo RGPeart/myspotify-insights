@@ -22,9 +22,6 @@ python -m src.ingestion.spotify_client
 python -m src.etl.bronze_to_silver
 python -m src.etl.silver_to_gold
 
-# Run full pipeline (Prefect optional — works without it)
-python -m src.etl.pipeline
-
 # Train recommendation model
 python -m src.models.train
 
@@ -90,9 +87,11 @@ src/etl/silver_to_gold.py          → data/gold/     (aggregated, feature-engin
 - Fails fast if silver tracks table is missing or empty
 - Quality gate: `assert_quality(report)` raises `DataQualityError` before writing Parquet if checks fail
 
-### Pipeline (`src/etl/pipeline.py`)
-- Soft Prefect dependency: `try: from prefect import flow, task` with no-op fallbacks so the pipeline runs as plain Python without Prefect installed
-- Install Prefect separately: `pip install "prefect>=3.0"`
+### Airflow DAG (`dags/spotify_etl_dag.py`)
+- DAG ID: `spotify_etl_pipeline`; no schedule (manual trigger only); `catchup=False`
+- Three tasks in sequence: `_ingest_data` → `_bronze_to_silver` → `_silver_to_gold`
+- Each task calls the corresponding Python module directly (`SpotifyIngestionClient().ingest()`, `bronze_to_silver.run()`, `silver_to_gold.run()`)
+- Runs via Docker Compose (`docker compose up -d`); Airflow UI at `http://localhost:8080`
 
 ## Environment Variables
 

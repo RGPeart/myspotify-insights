@@ -11,7 +11,7 @@ MySpotify Insights demonstrates production-grade data engineering practices by b
 - Serves recommendations via a REST API
 - Visualizes insights through an interactive dashboard
 
-**Tech Stack:** Python | Azure Blob Storage | FastAPI | Scikit-learn | Streamlit | Prefect (optional)
+**Tech Stack:** Python | Apache Airflow | Azure Blob Storage | FastAPI | Scikit-learn | Streamlit
 
 ## Architecture
 
