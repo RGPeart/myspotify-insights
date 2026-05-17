@@ -1,10 +1,8 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Project Overview
 
-**MySpotify Insights** is a Python-based data engineering portfolio project implementing an end-to-end music recommendation system. It demonstrates production-grade ETL pipelines, Azure cloud infrastructure, ML-based recommendations, a REST API, and an analytics dashboard.
+**MySpotify Insights** is a Python-based data engineering portfolio project implementing an end-to-end music recommendation system: ETL pipelines, Azure cloud infrastructure, ML-based recommendations, a REST API, and an analytics dashboard.
 
 ## Development Commands
 
@@ -14,15 +12,14 @@ python -m venv venv
 .\venv\Scripts\activate           # Windows
 pip install -r requirements.txt
 
-# Copy and populate credentials
+# Copy and populate credentials (see .env.example for required variables)
 cp .env.example .env
 
-# Run ingestion and ETL stages in order
-python -m src.ingestion.spotify_client
-python -m src.etl.bronze_to_silver
-python -m src.etl.silver_to_gold
+# Start Airflow stack (orchestrates the full pipeline)
+docker compose up -d
+# Trigger the 'spotify_etl_pipeline' DAG in the Airflow UI at http://localhost:8080
 
-# Train recommendation model
+# Train recommendation model (run after pipeline produces gold data)
 python -m src.models.train
 
 # Start API server
@@ -34,7 +31,7 @@ streamlit run src/dashboard/app.py
 # Run tests
 pytest
 pytest --cov=src tests/
-pytest tests/path/to/test_file.py::test_function   # single test
+pytest tests/path/to/test_file.py::test_function
 ```
 
 ## Architecture
@@ -67,8 +64,8 @@ src/etl/silver_to_gold.py          → data/gold/     (aggregated, feature-engin
 **Key relationships:**
 - `src/utils/data_quality.py` — `DataQualityReport`, `run_quality_checks`, `assert_quality` used across all ETL stages
 - `src/utils/logging_config.py` — shared structured logger used across all modules
-- `src/utils/config.py` — shared `load_config()` reads `config/config.yaml` with UTF-8 encoding; called lazily inside `run()` functions (not at import time)
-- `src/utils/parquet_io.py` — shared `write_parquet()` used by both ETL modules
+- `src/utils/config.py` — `load_config()` reads `config/config.yaml` with UTF-8 encoding; called lazily inside `run()` functions (not at import time)
+- `src/utils/parquet_io.py` — `write_parquet()` used by both ETL modules
 - `config/config.yaml` holds non-secret configuration; secrets go in `.env` (never `config/secrets.yaml`)
 - Azure Blob Storage mirrors the `data/` directory structure in the cloud
 
@@ -89,22 +86,9 @@ src/etl/silver_to_gold.py          → data/gold/     (aggregated, feature-engin
 
 ### Airflow DAG (`dags/spotify_etl_dag.py`)
 - DAG ID: `spotify_etl_pipeline`; no schedule (manual trigger only); `catchup=False`
-- Three tasks in sequence: `_ingest_data` → `_bronze_to_silver` → `_silver_to_gold`
+- Three tasks in sequence: `_ingest_data` → `_bronze_to_silver` → `_silver_to_gold`; each has `retries=2, retry_delay=1m, execution_timeout=1h`
 - Each task calls the corresponding Python module directly (`SpotifyIngestionClient().ingest()`, `bronze_to_silver.run()`, `silver_to_gold.run()`)
-- Runs via Docker Compose (`docker compose up -d`); Airflow UI at `http://localhost:8080`
-
-## Environment Variables
-
-Required in `.env` (see `.env.example`):
-
-| Variable | Purpose |
-|---|---|
-| `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | Spotify API OAuth credentials |
-| `SPOTIFY_REDIRECT_URI` | OAuth callback (e.g. `http://localhost:8888/callback`) |
-| `AZURE_STORAGE_CONNECTION_STRING` | Azure Blob Storage access |
-| `AZURE_STORAGE_CONTAINER_NAME` | Target container for data layers |
-| `DB_CONNECTION_STRING` | Optional database backend |
-| `API_HOST` / `API_PORT` | FastAPI bind address (defaults: `0.0.0.0` / `8000`) |
+- `dags/.airflowignore` excludes `test_dag.py` from the scheduler
 
 ## Branching Strategy
 
@@ -112,10 +96,8 @@ Required in `.env` (see `.env.example`):
 feature/* → release → main
 ```
 
-All feature branches target `release`. Once a feature is reviewed and merged to `release`, a consolidated PR moves it into `main`.
-
 ## CI/CD
 
-GitHub Actions (`.github/workflows/ci.yml`) triggers on push/PR to `main` and `develop`. The test and lint steps are currently commented out — uncomment them to re-enable pytest and flake8 runs on CI.
-
-The Claude Code Review workflow (`.github/workflows/claude-code-review.yml`) runs on PRs but excludes workflow-file-only changes via `paths-ignore` to avoid OIDC validation errors.
+GitHub Actions workflows:
+- `.github/workflows/ci.yml` — lint and test on push/PR to `main`; steps are currently commented out
+- `.github/workflows/claude-code-review.yml` — Claude code review on PRs; excludes workflow-file-only changes via `paths-ignore`

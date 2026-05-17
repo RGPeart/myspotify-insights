@@ -72,10 +72,7 @@ cp .env.example .env
 ```bash
 # 1. Set up and run Airflow (using Docker Compose)
 # Ensure Docker is running.
-# Create a dags directory if it doesn't exist and copy the DAG file to your Airflow DAGs folder (e.g., ./dags/spotify_etl_dag.py)
-# From the project root, navigate into the 'airflow' directory:
-# cd airflow
-# Initialize the Airflow database and create a user (first time only):
+# From the project root, initialize the Airflow database and create a user (first time only):
 # docker compose up airflow-init
 # Start Airflow services:
 # docker compose up -d

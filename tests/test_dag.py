@@ -81,6 +81,13 @@ class TestDagStructure:
         assert "spotify" in dag_module.dag.tags
         assert "etl" in dag_module.dag.tags
 
+    def test_task_ordering(self, dag_module):
+        ingest = dag_module.dag.get_task("_ingest_data")
+        b2s = dag_module.dag.get_task("_bronze_to_silver")
+        s2g = dag_module.dag.get_task("_silver_to_gold")
+        assert b2s.task_id in {t.task_id for t in ingest.downstream_list}
+        assert s2g.task_id in {t.task_id for t in b2s.downstream_list}
+
 
 # ---------------------------------------------------------------------------
 # Task callable tests — call the underlying function directly
