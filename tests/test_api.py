@@ -315,3 +315,37 @@ class TestArtistDetail:
     def test_no_data_returns_503(self, empty_client):
         response = empty_client.get("/artists/a0")
         assert response.status_code == 503
+
+
+# ------------------------------------------------------------------ #
+# GET /users and GET /tracks/ids                                       #
+# ------------------------------------------------------------------ #
+
+class TestUsersAndTrackIdsEndpoints:
+    def test_get_users_returns_200_and_list_of_ids(self, full_client, shared_data):
+        _, _, _, artifacts = shared_data
+        expected_user_ids = sorted(list(artifacts["collab"]["user_index"].keys()))
+        response = full_client.get("/users")
+        assert response.status_code == 200
+        data = response.json()
+        assert "user_ids" in data
+        assert sorted(data["user_ids"]) == expected_user_ids
+
+    def test_get_users_returns_503_if_collab_model_not_loaded(self, empty_client):
+        response = empty_client.get("/users")
+        assert response.status_code == 503
+        assert "Collaborative model not loaded" in response.json()["detail"]
+
+    def test_get_tracks_ids_returns_200_and_list_of_ids(self, full_client, shared_data):
+        dim_tracks, _, _, _ = shared_data
+        expected_track_ids = sorted(dim_tracks["track_id"].tolist())
+        response = full_client.get("/tracks/ids")
+        assert response.status_code == 200
+        data = response.json()
+        assert "track_ids" in data
+        assert sorted(data["track_ids"]) == expected_track_ids
+
+    def test_get_tracks_ids_returns_503_if_dim_tracks_not_loaded(self, empty_client):
+        response = empty_client.get("/tracks/ids")
+        assert response.status_code == 503
+        assert "Track data not loaded" in response.json()["detail"]
