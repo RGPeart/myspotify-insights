@@ -245,3 +245,6 @@ config/secrets.yaml
 
 # Azure
 .azure/
+
+# Logs
+logs/
