@@ -286,7 +286,7 @@ dbt/
     assert_composite_popularity_range.sql   # Custom singular test
   schema.yml                     # Column-level docs + built-in tests (unique, not_null)
   dbt_project.yml
-  profiles.yml                   # DuckDB connection pointing at data/silver/
+  profiles.yml                   # DuckDB connection config (database path; Parquet paths are resolved in model SQL via read_parquet())
 ```
 
 **Staging model (`stg_silver_tracks.sql`):**
@@ -303,8 +303,16 @@ select
     tempo,
     track_popularity,
     primary_genre
-from read_parquet('{{ env_var("SILVER_DIR") }}/tracks/*.parquet')
+from read_parquet('{{ var("silver_dir") }}/tracks/*.parquet')
 ```
+
+Set `silver_dir` in `dbt_project.yml` so it has a default and can be overridden at the CLI with `--vars`:
+```yaml
+# dbt_project.yml (vars block)
+vars:
+  silver_dir: "data/silver"
+```
+Override for CI or Airflow: `dbt run --vars '{"silver_dir": "/opt/airflow/data/silver"}'`
 
 **Core gold model (`dim_tracks.sql`):**
 ```sql
@@ -340,6 +348,49 @@ left join artists a on t.artist_id = a.artist_id
 cross join median_pop m
 ```
 
+**`dim_artists.sql`:**
+```sql
+{{ config(materialized='table') }}
+
+with artists as (
+    select * from {{ ref('stg_silver_artists') }}
+),
+median_pop as (
+    select percentile_cont(0.5) within group (order by artist_popularity) as value
+    from artists
+    where artist_popularity is not null
+)
+
+select
+    a.artist_id,
+    a.artist_name,
+    coalesce(a.artist_popularity, m.value, 0) as artist_popularity,
+    coalesce(a.primary_genre, 'unknown')       as primary_genre,
+    a.follower_count
+from artists a
+cross join median_pop m
+```
+
+**`fact_listening_history.sql`:**
+```sql
+{{ config(materialized='table') }}
+
+with history as (
+    select * from read_parquet('{{ var("silver_dir") }}/listening_history/*.parquet')
+),
+tracks as (
+    select track_id from {{ ref('dim_tracks') }}
+)
+
+select
+    h.played_at,
+    h.track_id,
+    h.context_type,
+    h.ms_played
+from history h
+inner join tracks t on h.track_id = t.track_id
+```
+
 **schema.yml (tests + column docs):**
 ```yaml
 version: 2
@@ -363,6 +414,43 @@ models:
       - name: primary_genre
         tests:
           - not_null
+
+  - name: dim_artists
+    description: "Gold layer artist dimension — popularity, genre, follower count."
+    columns:
+      - name: artist_id
+        description: "Spotify artist ID — primary key."
+        tests:
+          - unique
+          - not_null
+      - name: artist_popularity
+        description: "Artist popularity 0–100; median-imputed when null."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+      - name: primary_genre
+        tests:
+          - not_null
+
+  - name: fact_listening_history
+    description: "Fact table of Spotify play events joined to dim_tracks."
+    columns:
+      - name: played_at
+        description: "ISO 8601 timestamp of the play event."
+        tests:
+          - not_null
+      - name: track_id
+        description: "FK → dim_tracks.track_id."
+        tests:
+          - not_null
+      - name: ms_played
+        description: "Milliseconds the track was played."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
 ```
 
 **Airflow DAG integration:**
@@ -379,8 +467,9 @@ dbt_test = BashOperator(
     bash_command="cd /opt/airflow/dbt && dbt test --profiles-dir . --target prod",
 )
 
-# Pipeline order: ingest → bronze_to_silver → dbt_run → dbt_test
-_bronze_to_silver() >> dbt_run >> dbt_test
+# Reference the existing task instances (do NOT call the @task functions again)
+# Inside the with DAG(...) block:
+ingest_data >> transform_bronze_to_silver >> dbt_run >> dbt_test
 ```
 
 **dbt Docs Site:**
@@ -389,15 +478,22 @@ _bronze_to_silver() >> dbt_run >> dbt_test
 - Screenshot both for the portfolio README — together they demonstrate end-to-end lineage awareness
 
 **Implementation Steps:**
-1. `pip install dbt-core dbt-duckdb dbt-utils`
+1. `pip install dbt-core dbt-duckdb` (`dbt-utils` is a **dbt package**, not a pip package — see step 3)
 2. `cd dbt && dbt init spotify_gold` — initialise the project structure
-3. Configure `profiles.yml` with a DuckDB profile pointing at `data/silver/`
-4. Write staging models as thin views over the silver Parquet files
-5. Translate `silver_to_gold.py` logic into `dim_tracks.sql`, `dim_artists.sql`, `fact_listening_history.sql`
-6. Add `schema.yml` with `unique`, `not_null`, and `accepted_range` tests for all key columns
-7. Replace the `_silver_to_gold` Airflow task with `dbt_run` + `dbt_test` BashOperators
-8. Run `dbt docs generate` and add a screenshot of the lineage graph to the README under "Architecture"
-9. Add `dbt-core` and `dbt-duckdb` to `requirements.txt`
+3. Create `packages.yml` alongside `dbt_project.yml` and run `dbt deps` to install `dbt-utils`:
+   ```yaml
+   # dbt/packages.yml
+   packages:
+     - package: dbt-labs/dbt_utils
+       version: [">=1.0.0", "<2.0.0"]
+   ```
+4. Configure `profiles.yml` with a DuckDB profile (set the `path` to your DuckDB database file, e.g. `data/spotify.duckdb`)
+5. Write staging models as thin views over the silver Parquet files (use `var("silver_dir")` for Parquet paths)
+6. Translate `silver_to_gold.py` logic into `dim_tracks.sql`, `dim_artists.sql`, `fact_listening_history.sql`
+7. Add `schema.yml` with `unique`, `not_null`, and `accepted_range` tests for all key columns across all three gold models
+8. Replace the `_silver_to_gold` Airflow task with `dbt_run` + `dbt_test` BashOperators
+9. Run `dbt docs generate` and add a screenshot of the lineage graph to the README under "Architecture"
+10. Add `dbt-core` and `dbt-duckdb` to `requirements.txt`
 
 ---
 
