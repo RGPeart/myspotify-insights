@@ -90,6 +90,14 @@ async def recommendations(
     return {"user_id": user_id, "count": len(recs), "recommendations": recs}
 
 
+@router.get("/tracks/ids")
+async def get_all_track_ids(request: Request):
+    tracks_idx = getattr(request.app.state, "tracks_idx", None)
+    if tracks_idx is None:
+        raise HTTPException(status_code=503, detail="Track data not loaded")
+    return {"track_ids": tracks_idx.index.tolist()}
+
+
 @router.get("/tracks/{track_id}")
 async def track_detail(track_id: str, request: Request):
     tracks_idx = getattr(request.app.state, "tracks_idx", None)
@@ -128,3 +136,13 @@ async def artist_detail(artist_id: str, request: Request):
         return artist
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Artist '{artist_id}' not found")
+
+
+@router.get("/users")
+async def get_users(request: Request):
+    artifacts = getattr(request.app.state, "artifacts", None)
+    if artifacts is None or "collab" not in artifacts:
+        raise HTTPException(status_code=503, detail="Collaborative model not loaded — run `python -m src.models.train` first")
+
+    user_ids = list(artifacts["collab"]["user_index"].keys())
+    return {"user_ids": user_ids}

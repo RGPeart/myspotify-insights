@@ -29,7 +29,7 @@ python -m src.etl.pipeline
 python -m src.models.train
 
 # Start API server
-uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8001
 
 # Start dashboard
 streamlit run src/dashboard/app.py

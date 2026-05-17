@@ -85,10 +85,10 @@ python -m src.etl.pipeline
 # 4. Train recommendation model
 python -m src.models.train
 
-# 5. Start API server
-uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+# 5. Start API server (in a dedicated terminal)
+bash -c "source .venv/bin/activate && PYTHONPATH=. uvicorn src/api/main:app --reload --host 0.0.0.0 --port 8001"
 
-# 6. Start dashboard
+# 6. Start dashboard (in another dedicated terminal)
 streamlit run src/dashboard/app.py
 ```
 
