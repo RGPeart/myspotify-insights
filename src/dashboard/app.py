@@ -5,7 +5,6 @@ import pandas as pd
 import requests
 import plotly.express as px
 import os
-from datetime import datetime
 
 # Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001")
@@ -30,13 +29,14 @@ st.title("🎶 MySpotify Insights Dashboard")
 # Helper Functions
 # -----------------------------------------------------------------------------
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=3600)
 def fetch_data(endpoint: str, params: dict = None):
     try:
-        response = requests.get(f"{API_BASE_URL}/{endpoint}", params=params)
+        response = requests.get(f"{API_BASE_URL}/{endpoint}", params=params, timeout=10)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as e:
+        st.error(f"Error fetching data from API endpoint '{endpoint}': {e}")
         return None
 
 @st.cache_data(ttl=3600) # Cache user IDs for an hour
