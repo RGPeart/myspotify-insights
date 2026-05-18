@@ -78,7 +78,7 @@ x-airflow-common:
     # The following line can be used to set a custom config file, stored in the local config folder
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
     # OpenLineage — emit lineage events to Marquez (start with --profile lineage to activate)
-    OPENLINEAGE_URL: ${OPENLINEAGE_URL:-http://marquez:5000}
+    OPENLINEAGE_URL: ${OPENLINEAGE_URL:-http://marquez:5002}
     OPENLINEAGE_NAMESPACE: ${OPENLINEAGE_NAMESPACE:-myspotify-insights}
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
@@ -378,7 +378,7 @@ services:
       marquez-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:5000/api/v1/namespaces"]
+      test: ["CMD", "curl", "--fail", "http://localhost:5002/api/v1/namespaces"]
       interval: 30s
       timeout: 10s
       retries: 5
