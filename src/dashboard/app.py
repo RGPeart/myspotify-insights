@@ -182,14 +182,14 @@ st.markdown("---")
 # Data Lineage Graph (Marquez)
 # -----------------------------------------------------------------------------
 
-MARQUEZ_URL = os.getenv("MARQUEZ_URL", "http://localhost:5000")
+MARQUEZ_URL = os.getenv("MARQUEZ_URL", "http://localhost:5002")
 MARQUEZ_NAMESPACE = os.getenv("OPENLINEAGE_NAMESPACE", "myspotify-insights")
 
 st.header("🔗 Data Lineage")
 st.write(
     "Pipeline lineage tracked via [OpenLineage](https://openlineage.io) and "
     "[Marquez](https://marquezproject.ai). "
-    f"Marquez UI: `{MARQUEZ_URL.replace('5000', '3000')}`"
+    f"Marquez UI: `{MARQUEZ_URL.replace('5002', '3000')}`"
 )
 
 # Static pipeline topology (always shown)

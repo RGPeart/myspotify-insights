@@ -143,7 +143,7 @@ docker compose --profile lineage up -d marquez-db marquez marquez-web
 | Service | URL | Description |
 |---|---|---|
 | Marquez UI | http://localhost:3000 | Browse the lineage graph interactively |
-| Marquez API | http://localhost:5000/api/v1 | REST API consumed by the dashboard |
+| Marquez API | http://localhost:5002/api/v1 | REST API consumed by the dashboard |
 | Airflow UI | http://localhost:8080 | Trigger DAG runs |
 | Dashboard | http://localhost:8501 | Live lineage panel + recommendations |
 
@@ -163,7 +163,7 @@ The **Streamlit dashboard** includes a static pipeline topology diagram and a li
 |---|---|---|
 | `OPENLINEAGE_URL` | `http://marquez:5000` | Marquez API URL (inside Docker network) |
 | `OPENLINEAGE_NAMESPACE` | `myspotify-insights` | Namespace grouping all jobs and datasets |
-| `MARQUEZ_URL` | `http://localhost:5000` | Marquez API URL for the dashboard (outside Docker) |
+| `MARQUEZ_URL` | `http://localhost:5002` | Marquez API URL for the dashboard (outside Docker) |
 
 These are pre-configured in `.env.example` and `docker-compose.yaml`. No additional setup is needed beyond starting the lineage profile.
 

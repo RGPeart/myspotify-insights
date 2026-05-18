@@ -205,7 +205,7 @@ One of the hardest problems in production data engineering is answering "where d
 # Example: Airflow DAG with OpenLineage instrumentation
 # openlineage-airflow emits events automatically when OPENLINEAGE_URL is set
 # Set in Airflow environment:
-# OPENLINEAGE_URL=http://localhost:5000
+# OPENLINEAGE_URL=http://localhost:5002
 # OPENLINEAGE_NAMESPACE=myspotify-insights
 
 from airflow import DAG
@@ -251,7 +251,7 @@ log.info(
 
 **Implementation Steps:**
 1. `pip install openlineage-airflow structlog azure-monitor-opentelemetry`
-2. Deploy Marquez via Docker: `docker run -p 5000:5000 marquezproject/marquez`
+2. Deploy Marquez via Docker: `docker run -p 5002:5003 marquezproject/marquez`
 3. Set `OPENLINEAGE_URL` in Airflow environment variables
 4. Replace logging calls with `structlog` throughout codebase
 5. Configure Azure Monitor workspace and set connection string

@@ -342,7 +342,7 @@ services:
   # ---------------------------------------------------------------------------
   # Marquez — data lineage metadata store (opt-in: docker compose --profile lineage up)
   # UI:  http://localhost:3000
-  # API: http://localhost:5000/api/v1
+  # API: http://localhost:5002/api/v1
   # ---------------------------------------------------------------------------
   marquez-db:
     image: postgres:16
@@ -364,11 +364,11 @@ services:
   marquez:
     image: marquezproject/marquez:latest
     ports:
-      - "5000:5000"
-      - "5001:5001"
+      - "5002:5002"
+      - "5003:5003"
     environment:
-      - MARQUEZ_PORT=5000
-      - MARQUEZ_ADMIN_PORT=5001
+      - MARQUEZ_PORT=5002
+      - MARQUEZ_ADMIN_PORT=5003
       - POSTGRES_HOST=marquez-db
       - POSTGRES_PORT=5432
       - POSTGRES_DB=marquez
@@ -391,9 +391,10 @@ services:
     image: marquezproject/marquez-web:latest
     environment:
       - MARQUEZ_HOST=marquez
-      - MARQUEZ_PORT=5000
+      - MARQUEZ_PORT=5002
+      - WEB_PORT=${WEB_PORT:-3000}
     ports:
-      - "3000:3000"
+      - "${WEB_PORT:-3000}:${WEB_PORT:-3000}"
     depends_on:
       - marquez
     restart: always

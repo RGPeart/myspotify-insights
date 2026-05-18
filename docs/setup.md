@@ -103,7 +103,7 @@ The ingestion pipeline connects to the Spotify Web API using OAuth. You need to 
 
 3. Fill in any name and description (e.g. "MySpotify Insights"). Set the **Redirect URI** to:
    ```
-   http://localhost:5000/callback
+   http://localhost:8888/callback
    ```
    Accept the terms and click **Save**.
 
@@ -131,7 +131,7 @@ Open `.env` in any text editor and fill in your values:
 # Spotify API Credentials (from step 5)
 SPOTIFY_CLIENT_ID=paste_your_client_id_here
 SPOTIFY_CLIENT_SECRET=paste_your_client_secret_here
-SPOTIFY_REDIRECT_URI=http://localhost:5000/callback
+SPOTIFY_REDIRECT_URI=http://localhost:8888/callback
 
 # Azure Storage — leave as-is if running locally only
 AZURE_STORAGE_CONNECTION_STRING=your_connection_string_here
@@ -139,7 +139,7 @@ AZURE_STORAGE_CONTAINER_NAME=spotify-data
 
 # API Configuration — defaults are fine for local development
 API_HOST=0.0.0.0
-API_PORT=5000
+API_PORT=8001
 ```
 
 Save the file. You do **not** need to fill in the Azure variables to run Features 1 and 2 locally.
@@ -158,7 +158,7 @@ python -m src.ingestion.spotify_client
 
 ### What happens
 
-The first time you run this, your browser will open and ask you to log in to Spotify and authorise the app. After you confirm, the page will redirect to `localhost:5000/callback` — the page will appear to fail (that is expected), but the token has been captured.
+The first time you run this, your browser will open and ask you to log in to Spotify and authorise the app. After you confirm, the page will redirect to `localhost:8888/callback` — the page will appear to fail (that is expected), but the token has been captured.
 
 The script will then:
 - Fetch tracks across several genre categories
@@ -329,7 +329,7 @@ Wait ~30 seconds for the services to initialise. Then open:
 | URL | What you see |
 |---|---|
 | http://localhost:3000 | **Marquez UI** — interactive lineage graph |
-| http://localhost:5000/api/v1 | **Marquez REST API** — consumed by the dashboard |
+| http://localhost:5002/api/v1 | **Marquez REST API** — consumed by the dashboard |
 | http://localhost:8080 | **Airflow UI** — trigger the DAG to populate lineage |
 | http://localhost:8501 | **Streamlit dashboard** — includes a live lineage panel |
 
@@ -371,10 +371,10 @@ The pipeline reads this variable at startup via `src/utils/azure_monitor.py` and
 
 ```bash
 # Confirm Marquez is healthy
-curl http://localhost:5000/api/v1/namespaces
+curl http://localhost:5002/api/v1/namespaces
 
 # After triggering the DAG, list tracked jobs in the myspotify-insights namespace
-curl "http://localhost:5000/api/v1/namespaces/myspotify-insights/jobs" | python -m json.tool
+curl "http://localhost:5002/api/v1/namespaces/myspotify-insights/jobs" | python -m json.tool
 ```
 
 ---
