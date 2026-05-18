@@ -17,9 +17,10 @@ This guide walks you through setting up and running every part of the MySpotify 
 9. [Feature 3 — Recommendation Model](#9-feature-3--recommendation-model) *(coming soon)*
 10. [Feature 4 — REST API](#10-feature-4--rest-api) *(coming soon)*
 11. [Feature 5 — Analytics Dashboard](#11-feature-5--analytics-dashboard) *(coming soon)*
-12. [Running Tests](#12-running-tests)
-13. [Optional: Azure Cloud Storage](#13-optional-azure-cloud-storage)
-14. [Troubleshooting](#14-troubleshooting)
+12. [Feature 6 — Observability & Data Lineage](#12-feature-6--observability--data-lineage)
+13. [Running Tests](#13-running-tests)
+14. [Optional: Azure Cloud Storage](#14-optional-azure-cloud-storage)
+15. [Troubleshooting](#15-troubleshooting)
 
 ---
 
@@ -291,7 +292,94 @@ streamlit run src/dashboard/app.py
 
 ---
 
-## 12. Running Tests
+## 12. Feature 6 — Observability & Data Lineage
+
+**What it does:** Adds two observability layers to the pipeline:
+
+1. **Structured logging** — all pipeline stages emit machine-readable JSON logs via [structlog](https://www.structlog.org/), queryable by any log aggregator (Azure Monitor, Datadog, CloudWatch).
+2. **Data lineage tracking** — Airflow tasks automatically emit lineage events to [Marquez](https://marquezproject.ai/), recording which datasets each task reads and writes. A lineage graph panel is built into the Streamlit dashboard.
+
+### Structured logging
+
+No setup is needed. From this feature onward, every `python -m src.*` command and every Airflow task produces JSON-structured logs:
+
+```json
+{"event": "etl_stage_complete", "table": "tracks", "status": "PASS", "row_count": 342, "level": "info", "timestamp": "2026-05-17T06:12:34.123Z"}
+{"event": "ingestion_complete", "tracks": 342, "audio_features": 342, "artists": 87, "level": "info", "timestamp": "2026-05-17T06:11:58.001Z"}
+```
+
+You will see this output in the terminal whenever pipeline code runs.
+
+### Starting Marquez (data lineage store)
+
+Marquez is **opt-in** — it runs as a separate Docker Compose profile so it does not slow down the base Airflow stack.
+
+**Prerequisites:** Docker Desktop must be running.
+
+```bash
+# Start Airflow + Marquez together (recommended first-time setup)
+docker compose --profile lineage up -d
+
+# Or, if Airflow is already running, start only the Marquez services
+docker compose --profile lineage up -d marquez-db marquez marquez-web
+```
+
+Wait ~30 seconds for the services to initialise. Then open:
+
+| URL | What you see |
+|---|---|
+| http://localhost:3000 | **Marquez UI** — interactive lineage graph |
+| http://localhost:5000/api/v1 | **Marquez REST API** — consumed by the dashboard |
+| http://localhost:8080 | **Airflow UI** — trigger the DAG to populate lineage |
+| http://localhost:8501 | **Streamlit dashboard** — includes a live lineage panel |
+
+### Populating lineage data
+
+Lineage events are emitted **automatically** each time an Airflow task runs — no extra code is needed. The `apache-airflow-providers-openlineage` package hooks into the scheduler and records which task consumed which datasets and which it produced.
+
+1. Trigger the `spotify_etl_pipeline` DAG from the Airflow UI at http://localhost:8080
+2. Open the Marquez UI at http://localhost:3000
+3. Select the `myspotify-insights` namespace from the sidebar
+4. You will see jobs (`_ingest_data`, `_bronze_to_silver`, `_silver_to_gold`) and datasets (`bronze/tracks.json`, `silver/tracks.parquet`, `gold/dim_tracks.parquet`, etc.) connected by directed lineage edges
+
+The Streamlit dashboard also displays a static pipeline topology diagram and a live Marquez API panel under **Data Lineage**.
+
+### Stopping Marquez
+
+```bash
+# Stop only the Marquez services (leaves Airflow running)
+docker compose --profile lineage stop marquez marquez-web marquez-db
+
+# Stop and remove all containers including Airflow
+docker compose --profile lineage down
+```
+
+### Optional: Azure Monitor integration
+
+To forward structured logs and traces to Azure Application Insights:
+
+1. Create an **Application Insights** resource in the Azure Portal.
+2. Copy the **Connection String** from the resource's overview page.
+3. Add it to your `.env` file:
+   ```
+   AZURE_MONITOR_CONNECTION_STRING=InstrumentationKey=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx;...
+   ```
+
+The pipeline reads this variable at startup via `src/utils/azure_monitor.py` and configures the OpenTelemetry exporter automatically. If the variable is absent the pipeline continues running normally — Azure Monitor is entirely optional.
+
+### Verify it worked
+
+```bash
+# Confirm Marquez is healthy
+curl http://localhost:5000/api/v1/namespaces
+
+# After triggering the DAG, list tracked jobs in the myspotify-insights namespace
+curl "http://localhost:5000/api/v1/namespaces/myspotify-insights/jobs" | python -m json.tool
+```
+
+---
+
+## 13. Running Tests
 
 The test suite covers the data quality framework, all ETL transforms, and the pipeline orchestration.
 
@@ -313,7 +401,7 @@ All tests are in-memory and do not require real Spotify credentials or actual da
 
 ---
 
-## 13. Optional: Azure Cloud Storage
+## 14. Optional: Azure Cloud Storage
 
 By default, all data is stored locally under the `data/` folder. If you want to mirror data to Azure Blob Storage:
 
@@ -331,7 +419,7 @@ When valid Azure credentials are present, the ingestion script will automaticall
 
 ---
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 ### `ModuleNotFoundError: No module named 'src'`
 
