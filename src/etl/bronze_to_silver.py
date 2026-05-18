@@ -122,6 +122,15 @@ def transform_audio_features(raw: list[dict]) -> pd.DataFrame:
         return pd.DataFrame()
     df = pd.DataFrame(rows)
     df = df.dropna(subset=["track_id"])
+
+    # Spotify occasionally returns null audio-feature blobs (podcasts, local files,
+    # relinked/regional tracks). Drop them here so the silver quality gate doesn't trip.
+    before = len(df)
+    df = df.dropna(subset=["danceability", "energy", "tempo"])
+    dropped = before - len(df)
+    if dropped:
+        logger.warning("Dropped %d audio_features row(s) with null danceability/energy/tempo", dropped)
+
     df = df.drop_duplicates(subset=["track_id"], keep="first")
 
     # Normalize range-bound features; warn when values fall outside the defined bounds
