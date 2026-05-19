@@ -101,3 +101,19 @@ feature/* → release → main
 GitHub Actions workflows:
 - `.github/workflows/ci.yml` — lint and test on push/PR to `main`; steps are currently commented out
 - `.github/workflows/claude-code-review.yml` — Claude code review on PRs; excludes workflow-file-only changes via `paths-ignore`
+
+## Decision Records
+
+Major decisions — infrastructure choices, design trade-offs, accepted limitations, established conventions — are recorded as Architecture Decision Records (ADRs) in `docs/decisions/`, one file per date named `YYYY-MM-DD.md`.
+
+**When to add a decision record:**
+- Choosing between competing technical approaches with non-trivial trade-offs
+- Resolving infrastructure or configuration issues a future contributor might re-hit
+- Establishing a convention that is not obvious from the code (e.g., "always start the stack with `--profile lineage`")
+- Accepting a known limitation or explicitly deferring a fix to a later iteration
+
+**Format per decision:** `Status`, `Context`, `Decision`, `Consequences` sections.
+
+**Same-day rule:** If multiple decisions are made in a single day or session, append them to that date's file as numbered sections (`## 1. …`, `## 2. …`). Do not create multiple files for the same date — grouping related context together keeps the record readable.
+
+**Immutability:** Past decision files are historical records and should not be edited. To supersede a prior decision, write a new entry in the current day's file that references and overrides the older one by date and number (e.g., "Supersedes 2026-05-18 §2").

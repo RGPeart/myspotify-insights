@@ -203,9 +203,9 @@ One of the hardest problems in production data engineering is answering "where d
 
 ```python
 # Example: Airflow DAG with OpenLineage instrumentation
-# openlineage-airflow emits events automatically when OPENLINEAGE_URL is set
+# openlineage-airflow emits events automatically when MARQUEZ_URL is set
 # Set in Airflow environment:
-# OPENLINEAGE_URL=http://localhost:5000
+# MARQUEZ_URL=http://localhost:5002
 # OPENLINEAGE_NAMESPACE=myspotify-insights
 
 from airflow import DAG
@@ -251,15 +251,253 @@ log.info(
 
 **Implementation Steps:**
 1. `pip install openlineage-airflow structlog azure-monitor-opentelemetry`
-2. Deploy Marquez via Docker: `docker run -p 5000:5000 marquezproject/marquez`
-3. Set `OPENLINEAGE_URL` in Airflow environment variables
+2. Deploy Marquez via Docker: `docker run -p 5002:5002 marquezproject/marquez`
+3. Set `MARQUEZ_URL` in Airflow environment variables
 4. Replace logging calls with `structlog` throughout codebase
 5. Configure Azure Monitor workspace and set connection string
 6. Add lineage graph panel to dashboard using Marquez `/api/v1/lineage` endpoint
 
 ---
 
-### Feature 7: Schema Registry & Schema Evolution Management
+### Feature 7: SQL Transformation Layer with dbt + DuckDB
+**Description:** Replaces the Silver → Gold pandas transformation with dbt (data build tool) SQL models backed by DuckDB, bringing software-engineering practices — version-controlled models, automated testing, and auto-generated documentation with a visual lineage DAG — to the gold layer.
+
+**Why This Matters:**
+dbt is mentioned in the majority of senior data engineering job descriptions and has become the de-facto standard for transformation in the modern data stack. But beyond the resume signal, it is the architecturally correct tool here: SQL is the right language for dimensional modeling (joins, window functions, aggregations), while Python/pandas remains the right tool for the complex algorithmic cleaning in Bronze → Silver. Choosing each tool where it fits demonstrates engineering judgement, not just familiarity with buzzwords.
+
+**Architecture Change:**
+- **Bronze → Silver:** Stays as Python/pandas — audio feature normalization, genre classification, and malformed-record handling are algorithms, not queries.
+- **Silver → Gold:** Moves to dbt + DuckDB — dimensional modeling, popularity scoring, and artist joins are relational operations that are cleaner and more testable in SQL.
+
+**Technical Details:**
+
+**dbt Project Structure:**
+```
+dbt/
+  models/
+    staging/
+      stg_silver_tracks.sql      # Thin wrapper — selects from silver Parquet
+      stg_silver_artists.sql
+    gold/
+      dim_tracks.sql             # Core dimension with composite popularity
+      dim_artists.sql
+      fact_listening_history.sql
+  tests/
+    assert_composite_popularity_range.sql   # Custom singular test
+  schema.yml                     # Column-level docs + built-in tests (unique, not_null)
+  dbt_project.yml
+  profiles.yml                   # DuckDB connection config (database path; Parquet paths are resolved in model SQL via read_parquet())
+```
+
+**Staging model (`stg_silver_tracks.sql`):**
+```sql
+{{ config(materialized='view') }}
+
+select
+    track_id,
+    name,
+    artist_id,
+    danceability,
+    energy,
+    valence,
+    tempo,
+    track_popularity,
+    primary_genre
+from read_parquet('{{ var("silver_dir") }}/tracks/*.parquet')
+```
+
+Set `silver_dir` in `dbt_project.yml` so it has a default and can be overridden at the CLI with `--vars`:
+```yaml
+# dbt_project.yml (vars block)
+vars:
+  silver_dir: "data/silver"
+```
+Override for CI or Airflow: `dbt run --vars '{"silver_dir": "/opt/airflow/data/silver"}'`
+
+**Core gold model (`dim_tracks.sql`):**
+```sql
+{{ config(materialized='table') }}
+
+with tracks as (
+    select * from {{ ref('stg_silver_tracks') }}
+),
+artists as (
+    select * from {{ ref('stg_silver_artists') }}
+),
+median_pop as (
+    select percentile_cont(0.5) within group (order by artist_popularity) as value
+    from artists
+)
+
+select
+    t.track_id,
+    t.name,
+    t.artist_id,
+    a.artist_name,
+    coalesce(a.primary_genre, 'unknown')                                  as primary_genre,
+    t.danceability,
+    t.energy,
+    t.valence,
+    t.tempo,
+    round(
+        0.6 * t.track_popularity / 100.0
+        + 0.4 * coalesce(a.artist_popularity, m.value, 0) / 100.0,
+    4)                                                                     as composite_popularity
+from tracks t
+left join artists a on t.artist_id = a.artist_id
+cross join median_pop m
+```
+
+**`dim_artists.sql`:**
+```sql
+{{ config(materialized='table') }}
+
+with artists as (
+    select * from {{ ref('stg_silver_artists') }}
+),
+median_pop as (
+    select percentile_cont(0.5) within group (order by artist_popularity) as value
+    from artists
+    where artist_popularity is not null
+)
+
+select
+    a.artist_id,
+    a.artist_name,
+    coalesce(a.artist_popularity, m.value, 0) as artist_popularity,
+    coalesce(a.primary_genre, 'unknown')       as primary_genre,
+    a.follower_count
+from artists a
+cross join median_pop m
+```
+
+**`fact_listening_history.sql`:**
+```sql
+{{ config(materialized='table') }}
+
+with history as (
+    select * from read_parquet('{{ var("silver_dir") }}/listening_history/*.parquet')
+),
+tracks as (
+    select track_id from {{ ref('dim_tracks') }}
+)
+
+select
+    h.played_at,
+    h.track_id,
+    h.context_type,
+    h.ms_played
+from history h
+inner join tracks t on h.track_id = t.track_id
+```
+
+**schema.yml (tests + column docs):**
+```yaml
+version: 2
+
+models:
+  - name: dim_tracks
+    description: "Gold layer track dimension — composite popularity scores, genre, audio features."
+    columns:
+      - name: track_id
+        description: "Spotify track ID — primary key."
+        tests:
+          - unique
+          - not_null
+      - name: composite_popularity
+        description: "Weighted score: 60% track popularity + 40% artist popularity, scaled 0–1."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 1
+      - name: primary_genre
+        tests:
+          - not_null
+
+  - name: dim_artists
+    description: "Gold layer artist dimension — popularity, genre, follower count."
+    columns:
+      - name: artist_id
+        description: "Spotify artist ID — primary key."
+        tests:
+          - unique
+          - not_null
+      - name: artist_popularity
+        description: "Artist popularity 0–100; median-imputed when null."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+              max_value: 100
+      - name: primary_genre
+        tests:
+          - not_null
+
+  - name: fact_listening_history
+    description: "Fact table of Spotify play events joined to dim_tracks."
+    columns:
+      - name: played_at
+        description: "ISO 8601 timestamp of the play event."
+        tests:
+          - not_null
+      - name: track_id
+        description: "FK → dim_tracks.track_id."
+        tests:
+          - not_null
+      - name: ms_played
+        description: "Milliseconds the track was played."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              min_value: 0
+```
+
+**Airflow DAG integration:**
+```python
+from airflow.operators.bash import BashOperator
+
+dbt_run = BashOperator(
+    task_id="dbt_run_gold",
+    bash_command="cd /opt/airflow/dbt && dbt run --profiles-dir . --target prod",
+)
+
+dbt_test = BashOperator(
+    task_id="dbt_test_gold",
+    bash_command="cd /opt/airflow/dbt && dbt test --profiles-dir . --target prod",
+)
+
+# Reference the existing task instances (do NOT call the @task functions again)
+# Inside the with DAG(...) block:
+ingest_data >> transform_bronze_to_silver >> dbt_run >> dbt_test
+```
+
+**dbt Docs Site:**
+- `dbt docs generate && dbt docs serve` produces a browsable documentation site with an interactive lineage DAG (source → staging → gold models)
+- This DAG complements the Marquez lineage from Feature 6: Marquez shows task-level Airflow lineage; dbt shows model-level SQL lineage within the gold layer
+- Screenshot both for the portfolio README — together they demonstrate end-to-end lineage awareness
+
+**Implementation Steps:**
+1. `pip install dbt-core dbt-duckdb` (`dbt-utils` is a **dbt package**, not a pip package — see step 3)
+2. `cd dbt && dbt init spotify_gold` — initialise the project structure
+3. Create `packages.yml` alongside `dbt_project.yml` and run `dbt deps` to install `dbt-utils`:
+   ```yaml
+   # dbt/packages.yml
+   packages:
+     - package: dbt-labs/dbt_utils
+       version: [">=1.0.0", "<2.0.0"]
+   ```
+4. Configure `profiles.yml` with a DuckDB profile (set the `path` to your DuckDB database file, e.g. `data/spotify.duckdb`)
+5. Write staging models as thin views over the silver Parquet files (use `var("silver_dir")` for Parquet paths)
+6. Translate `silver_to_gold.py` logic into `dim_tracks.sql`, `dim_artists.sql`, `fact_listening_history.sql`
+7. Add `schema.yml` with `unique`, `not_null`, and `accepted_range` tests for all key columns across all three gold models
+8. Replace the `_silver_to_gold` Airflow task with `dbt_run` + `dbt_test` BashOperators
+9. Run `dbt docs generate` and add a screenshot of the lineage graph to the README under "Architecture"
+10. Add `dbt-core` and `dbt-duckdb` to `requirements.txt`
+
+---
+
+### Feature 8: Schema Registry & Schema Evolution Management
 **Description:** A lightweight schema registry that tracks the shape of data at each pipeline layer and maintains a changelog of schema changes — enabling safe API evolution and rapid diagnosis of breaking upstream changes.
 
 **Why This Matters:**
@@ -388,7 +626,7 @@ with open("schemas/silver/tracks.json", "w") as f:
 
 ---
 
-### Feature 8: Data Contracts Between Pipeline Stages
+### Feature 9: Data Contracts Between Pipeline Stages
 **Description:** Explicit, versioned contracts that define what each pipeline stage promises to produce and what downstream stages are allowed to expect — enforced at runtime with Pydantic.
 
 **Why This Matters:**
@@ -467,7 +705,7 @@ def enforce_contract(df: pd.DataFrame, contract: DataContract) -> None:
 
 ---
 
-### Feature 9: Idempotent DAGs with Backfill Capability
+### Feature 10: Idempotent DAGs with Backfill Capability
 **Description:** All Airflow DAGs are designed to be safely re-run for any historical date without creating duplicate data or corrupting state — and support a `backfill_date` parameter for historical reprocessing.
 
 **Why This Matters:**
@@ -541,7 +779,7 @@ airflow dags backfill etl_pipeline \
 
 ---
 
-### Feature 10: SLA Monitoring & Alerting
+### Feature 11: SLA Monitoring & Alerting
 **Description:** Formal SLA definitions for each pipeline stage with automated alerting when deadlines are missed — demonstrating awareness of downstream data dependencies.
 
 **Why This Matters:**
@@ -633,7 +871,7 @@ dag = DAG(
 
 ---
 
-### Feature 11: Cloud Cost Monitoring & Reporting
+### Feature 12: Cloud Cost Monitoring & Reporting
 **Description:** A lightweight cost tracking layer that measures actual Azure spend against estimates, documents resource right-sizing decisions, and surfaces cost data in the dashboard.
 
 **Why This Matters:**
@@ -845,11 +1083,13 @@ def fetch_daily_costs(subscription_id: str, resource_group: str, token: str) -> 
 
 ### Milestone 2: ETL Pipeline & Data Models (Week 2)
 **Deliverables:**
-- [ ] Bronze → Silver → Gold data transformations
-- [ ] Dimensional data models (fact/dim tables)
-- [ ] Airflow/Prefect DAG running locally
-- [ ] Data quality tests implemented
-- [ ] Parquet/SQL storage working
+- [ ] Bronze → Silver transformation (Python/pandas)
+- [ ] Silver → Gold transformation migrated to dbt SQL models (dim_tracks, dim_artists, fact_listening_history)
+- [ ] dbt project initialised under `/dbt/` with DuckDB profile
+- [ ] dbt staging models reading from silver Parquet files
+- [ ] dbt schema tests: `unique`, `not_null`, `accepted_range` on all key columns
+- [ ] `dbt run && dbt test` wired into the Airflow DAG after `_bronze_to_silver`
+- [ ] `dbt docs generate` screenshot added to README lineage section
 - [ ] Pydantic models defined for all 5 datasets in `/src/models/`
 - [ ] JSON Schema files generated from Pydantic models in `/schemas/`
 - [ ] `DataContract` dataclass defined and contracts created for all stage boundaries
@@ -858,7 +1098,7 @@ def fetch_daily_costs(subscription_id: str, resource_group: str, token: str) -> 
 - [ ] All write operations updated to be idempotent (overwrite or upsert)
 - [ ] `catchup=True` and `backfill_date` param added to all DAGs
 
-**Success Criteria:** Automated pipeline processes raw Spotify data into analytics-ready tables; re-running any task for a past date produces identical output with no duplicates; contract violations raise and halt the pipeline within 1 second of a bad record.
+**Success Criteria:** Automated pipeline processes raw Spotify data into analytics-ready gold tables via dbt; `dbt test` passes with 0 failures; re-running any task for a past date produces identical output with no duplicates; contract violations raise and halt the pipeline within 1 second of a bad record.
 
 ---
 
@@ -869,7 +1109,7 @@ def fetch_daily_costs(subscription_id: str, resource_group: str, token: str) -> 
 - [ ] FastAPI service with 4 core endpoints
 - [ ] API deployed to Azure App Service
 - [ ] OpenAPI documentation live
-- [ ] Marquez deployed (Docker or cloud) and `OPENLINEAGE_URL` configured
+- [ ] Marquez deployed (Docker or cloud) and `MARQUEZ_URL` configured
 - [ ] All Airflow DAGs instrumented with `openlineage-airflow` provider
 - [ ] Lineage graph visible in Marquez UI showing full bronze → gold flow
 - [ ] Azure Monitor workspace configured; structured logs forwarded
@@ -921,7 +1161,8 @@ def fetch_daily_costs(subscription_id: str, resource_group: str, token: str) -> 
 ### Tech Stack Summary
 - **Cloud:** Azure (Blob Storage, Functions, App Service, SQL Database, Monitor, Cost Management)
 - **Orchestration:** Airflow
-- **Processing:** Python (pandas, polars)
+- **Transformation (Gold layer):** dbt Core + DuckDB
+- **Processing:** Python (pandas)
 - **ML:** Scikit-learn, Surprise (collaborative filtering)
 - **API:** FastAPI
 - **Dashboard:** Streamlit or React

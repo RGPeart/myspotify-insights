@@ -77,6 +77,10 @@ x-airflow-common:
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
     # The following line can be used to set a custom config file, stored in the local config folder
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
+    # OpenLineage — emit lineage events to Marquez (start with --profile lineage to activate).
+    # Leave MARQUEZ_URL unset to disable; set it in .env when running with --profile lineage.
+    MARQUEZ_URL: ${MARQUEZ_URL}
+    OPENLINEAGE_NAMESPACE: ${OPENLINEAGE_NAMESPACE:-myspotify-insights}
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs
@@ -336,5 +340,69 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  # ---------------------------------------------------------------------------
+  # Marquez — data lineage metadata store (opt-in: docker compose --profile lineage up)
+  # UI:  http://localhost:3000
+  # API: http://localhost:5002/api/v1
+  # ---------------------------------------------------------------------------
+  marquez-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: marquez
+      POSTGRES_PASSWORD: marquez
+      POSTGRES_DB: marquez
+    volumes:
+      - marquez-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "marquez"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+    profiles:
+      - lineage
+
+  marquez:
+    image: marquezproject/marquez:0.50.0
+    ports:
+      - "5002:5002"
+      - "5003:5003"
+    environment:
+      - MARQUEZ_PORT=5002
+      - MARQUEZ_ADMIN_PORT=5003
+      - POSTGRES_HOST=marquez-db
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=marquez
+      - POSTGRES_USER=marquez
+      - POSTGRES_PASSWORD=marquez
+    depends_on:
+      marquez-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:5002/api/v1/namespaces"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: always
+    profiles:
+      - lineage
+
+  marquez-web:
+    image: marquezproject/marquez-web:0.7.0
+    environment:
+      - MARQUEZ_HOST=marquez
+      - MARQUEZ_PORT=5002
+      - WEB_PORT=${WEB_PORT:-3000}
+    ports:
+      - "${WEB_PORT:-3000}:${WEB_PORT:-3000}"
+    depends_on:
+      marquez:
+        condition: service_healthy
+    restart: always
+    profiles:
+      - lineage
+
 volumes:
   postgres-db-volume:
+  marquez-db-volume:
