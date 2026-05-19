@@ -13,7 +13,7 @@ MySpotify Insights demonstrates production-grade data engineering practices by b
 - Tracks full data lineage with OpenLineage and Marquez
 - Emits structured JSON logs via structlog for queryable observability
 
-**Tech Stack:** Python | Apache Airflow | Azure Blob Storage | FastAPI | Scikit-learn | Streamlit | structlog | OpenLineage | Marquez
+**Tech Stack:** Python | Apache Airflow | dbt + DuckDB | Azure Blob Storage | FastAPI | Scikit-learn | Streamlit | structlog | OpenLineage | Marquez
 
 ## Architecture
 
@@ -29,7 +29,8 @@ src/ingestion/spotify_client.py    →  data/bronze/   (raw JSON)
 src/etl/bronze_to_silver.py        →  data/silver/   (cleaned, validated Parquet)
     │                                      │ lineage event emitted
     ▼                                      ▼
-src/etl/silver_to_gold.py          →  data/gold/     (dimensional model, composite scores)
+dbt run (dbt/models/gold/*.sql)    →  data/gold/     (dimensional model in SQL,
+    │                                      │              external Parquet via DuckDB)
     │                                      │ lineage event emitted
     ├──► src/models/train.py        (collaborative + content-based recommendation model)
     │         │
@@ -100,6 +101,96 @@ streamlit run src/dashboard/app.py
 #    Open http://localhost:8501
 ```
 
+## SQL Transformation Layer (dbt + DuckDB)
+
+The Silver → Gold step is implemented as a dbt project at [`dbt/`](dbt/) using the [`dbt-duckdb`](https://github.com/duckdb/dbt-duckdb) adapter. SQL models replace the legacy `src/etl/silver_to_gold.py` (kept in the repo for reference but no longer invoked by the DAG).
+
+**Layout:**
+
+```
+dbt/
+├── dbt_project.yml
+├── profiles.yml                 # DuckDB profile (dev + prod targets)
+├── packages.yml                 # dbt_utils dependency
+├── package-lock.yml             # pinned dbt_utils version
+└── models/
+    ├── staging/                 # views over silver/*.parquet via read_parquet()
+    │   ├── stg_silver_tracks.sql
+    │   ├── stg_silver_artists.sql
+    │   ├── stg_silver_audio_features.sql
+    │   └── schema.yml
+    └── gold/                    # materialized='external' → writes data/gold/*.parquet
+        ├── dim_tracks.sql
+        ├── dim_artists.sql
+        ├── fact_audio_features.sql
+        └── schema.yml           # unique / not_null / accepted_range tests
+```
+
+Gold models use `materialized='external'` so the outputs land in `data/gold/*.parquet` exactly where the API and Streamlit dashboard already read from — no downstream changes were needed. The `data/spotify.duckdb` database is created alongside as a queryable view layer over those Parquet files.
+
+### Run dbt locally
+
+From the **repo root** with the virtualenv active:
+
+```bash
+# One-time: install dbt_utils package
+cd dbt && dbt deps --profiles-dir . && cd ..
+
+# Build the gold models (writes data/gold/*.parquet and data/spotify.duckdb)
+cd dbt
+dbt run  --profiles-dir . --vars "{silver_dir: '$PWD/../data/silver', gold_dir: '$PWD/../data/gold'}"
+dbt test --profiles-dir . --vars "{silver_dir: '$PWD/../data/silver', gold_dir: '$PWD/../data/gold'}"
+```
+
+**Windows (PowerShell):**
+
+```powershell
+cd dbt
+dbt deps --profiles-dir .
+$repo = (Resolve-Path ..).Path
+$env:DBT_DUCKDB_PATH = "$repo\data\spotify.duckdb"
+$vars = "{silver_dir: '$($repo -replace '\\','/')/data/silver', gold_dir: '$($repo -replace '\\','/')/data/gold'}"
+dbt run  --profiles-dir . --vars $vars
+dbt test --profiles-dir . --vars $vars
+```
+
+Expected output: `PASS=6 WARN=0 ERROR=0` (3 staging views + 3 gold external models) and `PASS=35` data tests.
+
+### Query the DuckDB database
+
+```bash
+python -c "import duckdb; con = duckdb.connect('data/spotify.duckdb', read_only=True); print(con.execute('SELECT count(*) FROM dim_tracks').fetchone())"
+```
+
+Or with the DuckDB CLI:
+
+```bash
+duckdb data/spotify.duckdb -c "SELECT primary_genre, count(*) FROM dim_tracks GROUP BY 1 ORDER BY 2 DESC;"
+```
+
+### Browse the lineage graph
+
+```bash
+cd dbt
+dbt docs generate --profiles-dir .
+dbt docs serve    --profiles-dir .   # opens http://localhost:8080
+```
+
+The dbt docs site complements the OpenLineage/Marquez graph from Feature 6: Marquez shows job-level Airflow lineage; dbt shows model-level SQL lineage within the gold layer.
+
+### Run dbt via Airflow
+
+The `spotify_etl_pipeline` DAG executes `dbt deps → dbt run → dbt test` after `_bronze_to_silver`. `docker-compose.yaml` mounts `./dbt → /opt/airflow/dbt`, and `dbt-core` + `dbt-duckdb` are installed inside the Airflow image via `requirements.txt`. No manual setup is needed inside Airflow — trigger the DAG and dbt runs automatically.
+
+### dbt vars
+
+| Var | Default | Override via |
+|---|---|---|
+| `silver_dir` | `data/silver` | `--vars '{"silver_dir": "/abs/path"}'` |
+| `gold_dir`   | `data/gold`   | `--vars '{"gold_dir": "/abs/path"}'` |
+
+The DuckDB file path is set with the `DBT_DUCKDB_PATH` env var (defaults to `data/spotify.duckdb` in `profiles.yml`).
+
 ## Observability & Data Lineage
 
 ### Structured Logging
@@ -151,7 +242,7 @@ docker compose --profile lineage up -d marquez-db marquez marquez-web
 
 After triggering the `spotify_etl_pipeline` DAG at least once, Marquez will show:
 
-- **Jobs:** `_ingest_data`, `_bronze_to_silver`, `_silver_to_gold` (one node per Airflow task)
+- **Jobs:** `_ingest_data`, `_bronze_to_silver`, `dbt_deps`, `dbt_run_gold`, `dbt_test_gold` (one node per Airflow task)
 - **Datasets:** `bronze/tracks.json`, `silver/tracks.parquet`, `gold/dim_tracks.parquet`, etc.
 - **Edges:** which task produced each dataset and which task consumed it
 
@@ -190,8 +281,8 @@ pytest tests/test_etl.py::TestBronzeToSilverRun::test_run_end_to_end
 | Feature 3: Recommendation model | Done | `main` |
 | Feature 4: FastAPI service | Done | `main` |
 | Feature 5: Streamlit dashboard | Done | `main` |
-| Feature 6: Observability & Data Lineage | In Progress | `feature/data-lineage` |
-| Feature 7: SQL Transformation Layer (dbt + DuckDB) | Planned | — |
+| Feature 6: Observability & Data Lineage | In Progress | `main` |
+| Feature 7: SQL Transformation Layer (dbt + DuckDB) | In Progress | `feature/dbt-duckdb` |
 | Feature 8: Schema Registry & Schema Evolution | Planned | — |
 | Feature 9: Data Contracts | Planned | — |
 | Feature 10: Idempotent DAGs & Backfill | Planned | — |
