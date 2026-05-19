@@ -27,4 +27,5 @@ models:
       +materialized: view
     gold:
       +materialized: external
-      +format: parquet
+      # Per-model SQL config sets format='parquet' on each gold model
+      # (project-level +format is no longer accepted by dbt-core).
