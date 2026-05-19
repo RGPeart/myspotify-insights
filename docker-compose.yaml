@@ -77,8 +77,9 @@ x-airflow-common:
     _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
     # The following line can be used to set a custom config file, stored in the local config folder
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
-    # OpenLineage — emit lineage events to Marquez (start with --profile lineage to activate)
-    OPENLINEAGE_URL: ${OPENLINEAGE_URL:-http://marquez:5002}
+    # OpenLineage — emit lineage events to Marquez (start with --profile lineage to activate).
+    # Leave OPENLINEAGE_URL unset to disable; set it in .env when running with --profile lineage.
+    OPENLINEAGE_URL: ${OPENLINEAGE_URL}
     OPENLINEAGE_NAMESPACE: ${OPENLINEAGE_NAMESPACE:-myspotify-insights}
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
@@ -396,7 +397,8 @@ services:
     ports:
       - "${WEB_PORT:-3000}:${WEB_PORT:-3000}"
     depends_on:
-      - marquez
+      marquez:
+        condition: service_healthy
     restart: always
     profiles:
       - lineage

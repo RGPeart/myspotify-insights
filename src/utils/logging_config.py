@@ -15,7 +15,7 @@ def _configure() -> None:
             structlog.stdlib.PositionalArgumentsFormatter(),
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
+            structlog.processors.ExceptionRenderer(),
             structlog.processors.UnicodeDecoder(),
             structlog.processors.JSONRenderer(),
         ],
@@ -28,11 +28,12 @@ def _configure() -> None:
     if not root.handlers:
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(logging.INFO)
+        handler.setFormatter(logging.Formatter("%(message)s"))
         root.addHandler(handler)
         root.setLevel(logging.INFO)
 
 
-def get_logger(name: str):
+def get_logger(name: str) -> structlog.stdlib.BoundLogger:
     global _configured
     if not _configured:
         _configure()

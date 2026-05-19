@@ -251,7 +251,7 @@ log.info(
 
 **Implementation Steps:**
 1. `pip install openlineage-airflow structlog azure-monitor-opentelemetry`
-2. Deploy Marquez via Docker: `docker run -p 5002:5003 marquezproject/marquez`
+2. Deploy Marquez via Docker: `docker run -p 5002:5002 marquezproject/marquez`
 3. Set `OPENLINEAGE_URL` in Airflow environment variables
 4. Replace logging calls with `structlog` throughout codebase
 5. Configure Azure Monitor workspace and set connection string

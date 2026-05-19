@@ -183,13 +183,14 @@ st.markdown("---")
 # -----------------------------------------------------------------------------
 
 MARQUEZ_URL = os.getenv("MARQUEZ_URL", "http://localhost:5002")
+MARQUEZ_WEB_URL = os.getenv("MARQUEZ_WEB_URL", "http://localhost:3000")
 MARQUEZ_NAMESPACE = os.getenv("OPENLINEAGE_NAMESPACE", "myspotify-insights")
 
 st.header("🔗 Data Lineage")
 st.write(
     "Pipeline lineage tracked via [OpenLineage](https://openlineage.io) and "
     "[Marquez](https://marquezproject.ai). "
-    f"Marquez UI: `{MARQUEZ_URL.replace('5002', '3000')}`"
+    f"Marquez UI: `{MARQUEZ_WEB_URL}`"
 )
 
 # Static pipeline topology (always shown)

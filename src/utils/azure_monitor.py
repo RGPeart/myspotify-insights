@@ -19,17 +19,12 @@ def configure_azure_monitor() -> bool:
         )
         return False
 
+    from azure.monitor.opentelemetry import configure_azure_monitor as _configure
+
     try:
-        from azure.monitor.opentelemetry import configure_azure_monitor as _configure
         _configure(connection_string=connection_string)
         _log.info("azure_monitor_configured")
         return True
-    except ImportError:
-        _log.warning(
-            "azure_monitor_unavailable",
-            reason="azure-monitor-opentelemetry package not installed",
-        )
-        return False
     except Exception as exc:
         _log.warning("azure_monitor_error", error=str(exc))
         return False
