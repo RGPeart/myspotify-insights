@@ -81,10 +81,11 @@ src/etl/silver_to_gold.py          → data/gold/     (aggregated, feature-engin
 ### Silver → Gold (dbt project at `dbt/`)
 - Implemented in dbt + DuckDB; replaces the legacy `src/etl/silver_to_gold.py` (kept in-tree for reference but no longer invoked by the DAG).
 - Staging models (`stg_silver_*`) are views over the silver Parquet files via DuckDB's `read_parquet()`.
-- Gold models use `materialized='external'` with `format='parquet'` so outputs land in `data/gold/*.parquet` exactly where the API and dashboard already read from.
+- Gold models switch materialisation based on `target.type`: `external` Parquet on DuckDB (lands in `data/gold/*.parquet` exactly where the API and dashboard read from), or `table` on Postgres.
 - `dim_tracks` recreates the pandas composite-popularity semantics in SQL: `0.6 × track_popularity/100 + 0.4 × artist_popularity/100`, clipped to [0, 1], with artist popularity median-imputed for unmatched rows.
 - Tests in `dbt/models/*/schema.yml` cover `unique`, `not_null`, and `dbt_utils.accepted_range` on key columns.
 - `silver_dir` and `gold_dir` are dbt vars defaulting to `data/silver` and `data/gold`; override in Airflow with `--vars '{"silver_dir": "/opt/airflow/data/silver", ...}'`.
+- `dbt/profiles.yml` defines three targets: `dev` (DuckDB, local), `prod` (DuckDB, in-container), and `pg` (Postgres). The Airflow DAG selects between them via the `DBT_TARGET` env var; when `DBT_TARGET=pg`, the BashOperator exports Postgres credentials from the `dbt_postgres` Airflow Connection into env vars that `profiles.yml` reads via `env_var()`.
 
 ### Airflow DAG (`dags/spotify_etl_dag.py`)
 - DAG ID: `spotify_etl_pipeline`; no schedule (manual trigger only); `catchup=False`

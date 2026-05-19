@@ -479,6 +479,44 @@ dbt docs serve    --profiles-dir .   # opens http://localhost:8080
 
 This complements the Marquez lineage from Feature 6 — Marquez shows task-level Airflow lineage, dbt shows model-level SQL lineage within the gold layer.
 
+### Switching the warehouse to Postgres (future)
+
+dbt is wired to support two targets — `prod` (DuckDB, default) and `pg` (Postgres) — so you can flip the gold warehouse without changing any model code. The Airflow Connection-to-dbt plumbing is already in place; you only need to enable it.
+
+**Step 1 — Provision a Postgres database.** Either reuse the existing `postgres` service from `docker-compose.yaml` (create a `gold` database alongside the `airflow` one) or stand up a separate Postgres. Make sure it's reachable from the Airflow worker container.
+
+**Step 2 — Register an Airflow Connection.** From the Airflow CLI:
+
+```bash
+docker compose exec airflow-apiserver airflow connections add dbt_postgres \
+    --conn-type postgres \
+    --conn-host        <hostname-reachable-from-airflow> \
+    --conn-port        5432 \
+    --conn-login       <username> \
+    --conn-password    <password> \
+    --conn-schema      <database-name>
+```
+
+(`--conn-schema` here is Airflow's term for the **database** name, not the Postgres schema. The Postgres schema is set separately via `DBT_PG_SCHEMA`.)
+
+Or in the Airflow UI: **Admin → Connections → Add**, with `Connection Id = dbt_postgres` and `Conn Type = Postgres`.
+
+**Step 3 — Flip the target.** In your `.env`:
+
+```
+DBT_TARGET=pg
+DBT_PG_CONN_ID=dbt_postgres
+DBT_PG_SCHEMA=gold
+```
+
+Then `docker compose up -d --force-recreate airflow-apiserver airflow-scheduler airflow-worker` to pick up the new env vars.
+
+**Step 4 — Trigger the DAG.** `dbt_run_gold` and `dbt_test_gold` will now build `dim_tracks`, `dim_artists`, and `fact_audio_features` as Postgres **tables** under the `gold` schema. The gold model SQL automatically switches materialisation based on `target.type` (external Parquet on DuckDB, regular tables on Postgres).
+
+**Known limitation:** the staging models still read silver Parquet via DuckDB's `read_parquet()`, which Postgres cannot do. To run end-to-end against Postgres you'll need to first load `data/silver/*.parquet` into the Postgres database (via a separate Airflow task using `pandas.read_parquet` + `to_sql`, or via `COPY FROM`). The gold transformation itself works as-is once the staging tables exist.
+
+---
+
 ### Re-running and idempotency
 
 `dbt run` is idempotent: re-running over the same silver data overwrites the Parquet outputs and recreates the DuckDB views. There is no need to delete `data/spotify.duckdb` between runs.

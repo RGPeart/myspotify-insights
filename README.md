@@ -191,6 +191,15 @@ The `spotify_etl_pipeline` DAG executes `dbt deps → dbt run → dbt test` afte
 
 The DuckDB file path is set with the `DBT_DUCKDB_PATH` env var (defaults to `data/spotify.duckdb` in `profiles.yml`).
 
+### Switching the warehouse to Postgres
+
+`dbt/profiles.yml` defines a `pg` target alongside DuckDB. To route the gold layer through Postgres:
+
+1. Register an Airflow Connection named `dbt_postgres` (CLI: `airflow connections add dbt_postgres --conn-type postgres ...`, or via the Airflow UI).
+2. Set `DBT_TARGET=pg` in `.env` and recreate the Airflow containers.
+
+The DAG's `BashOperator`s pull credentials from the Connection at task-execution time via Jinja (`{{ conn.dbt_postgres.host }}` etc.) and export them as env vars that `profiles.yml` reads. Gold model SQL automatically switches from `external` Parquet materialisation to regular tables when `target.type == 'postgres'`. See [`docs/setup.md`](docs/setup.md#switching-the-warehouse-to-postgres-future) for the full procedure and a note on the silver-loading limitation.
+
 ## Observability & Data Lineage
 
 ### Structured Logging

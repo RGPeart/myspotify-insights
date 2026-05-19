@@ -81,6 +81,11 @@ x-airflow-common:
     # Leave MARQUEZ_URL unset to disable; set it in .env when running with --profile lineage.
     MARQUEZ_URL: ${MARQUEZ_URL}
     OPENLINEAGE_NAMESPACE: ${OPENLINEAGE_NAMESPACE:-myspotify-insights}
+    # dbt target switch — see dbt/profiles.yml. Default keeps DuckDB; set DBT_TARGET=pg
+    # in .env to route the DAG through Postgres via the `dbt_postgres` Airflow Connection.
+    DBT_TARGET: ${DBT_TARGET:-prod}
+    DBT_PG_CONN_ID: ${DBT_PG_CONN_ID:-dbt_postgres}
+    DBT_PG_SCHEMA: ${DBT_PG_SCHEMA:-gold}
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - ${AIRFLOW_PROJ_DIR:-.}/logs:/opt/airflow/logs

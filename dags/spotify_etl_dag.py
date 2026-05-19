@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 import pendulum
 from datetime import timedelta
 
@@ -29,6 +30,27 @@ def _bronze_to_silver():
 DBT_PROJECT_DIR = "/opt/airflow/dbt"
 DBT_VARS = '{"silver_dir": "/opt/airflow/data/silver", "gold_dir": "/opt/airflow/data/gold"}'
 
+# Switch the dbt target via env var on the Airflow image:
+#   DBT_TARGET=prod   → DuckDB (default)
+#   DBT_TARGET=pg     → Postgres, credentials pulled from Airflow Connection $DBT_PG_CONN_ID
+DBT_TARGET = os.environ.get("DBT_TARGET", "prod")
+DBT_PG_CONN_ID = os.environ.get("DBT_PG_CONN_ID", "dbt_postgres")
+
+# When targeting Postgres, project Airflow Connection fields into env vars that
+# dbt/profiles.yml reads via env_var(). Jinja templates resolve at task execution
+# time, so the Connection only needs to exist when the task actually runs.
+if DBT_TARGET == "pg":
+    DBT_ENV = {
+        "DBT_PG_HOST":     f"{{{{ conn.{DBT_PG_CONN_ID}.host }}}}",
+        "DBT_PG_PORT":     f"{{{{ conn.{DBT_PG_CONN_ID}.port }}}}",
+        "DBT_PG_DBNAME":   f"{{{{ conn.{DBT_PG_CONN_ID}.schema }}}}",
+        "DBT_PG_USER":     f"{{{{ conn.{DBT_PG_CONN_ID}.login }}}}",
+        "DBT_PG_PASSWORD": f"{{{{ conn.{DBT_PG_CONN_ID}.password }}}}",
+        "DBT_PG_SCHEMA":   os.environ.get("DBT_PG_SCHEMA", "gold"),
+    }
+else:
+    DBT_ENV = {}
+
 
 with DAG(
     dag_id="spotify_etl_pipeline",
@@ -52,8 +74,10 @@ with DAG(
         task_id="dbt_run_gold",
         bash_command=(
             f"cd {DBT_PROJECT_DIR} && "
-            f"dbt run --profiles-dir . --target prod --vars '{DBT_VARS}'"
+            f"dbt run --profiles-dir . --target {DBT_TARGET} --vars '{DBT_VARS}'"
         ),
+        env=DBT_ENV,
+        append_env=True,
         retries=2,
         retry_delay=timedelta(minutes=1),
         execution_timeout=timedelta(hours=1),
@@ -63,8 +87,10 @@ with DAG(
         task_id="dbt_test_gold",
         bash_command=(
             f"cd {DBT_PROJECT_DIR} && "
-            f"dbt test --profiles-dir . --target prod --vars '{DBT_VARS}'"
+            f"dbt test --profiles-dir . --target {DBT_TARGET} --vars '{DBT_VARS}'"
         ),
+        env=DBT_ENV,
+        append_env=True,
         retries=1,
         execution_timeout=timedelta(minutes=30),
     )

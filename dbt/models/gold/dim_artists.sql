@@ -1,8 +1,12 @@
+{% if target.type == 'duckdb' %}
 {{ config(
     materialized='external',
     location=var('gold_dir') ~ '/dim_artists.parquet',
     format='parquet'
 ) }}
+{% else %}
+{{ config(materialized='table') }}
+{% endif %}
 
 select
     artist_id,

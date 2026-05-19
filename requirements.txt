@@ -43,6 +43,9 @@ azure-monitor-opentelemetry>=1.6.0
 # Transformation (gold layer)
 dbt-core>=1.7.0
 dbt-duckdb>=1.7.0
+# dbt-postgres is the future target (see dbt/profiles.yml `pg` output).
+# Kept installed so users can flip DBT_TARGET=pg without rebuilding the image.
+dbt-postgres>=1.7.0
 
 # Utils
 requests>=2.31.0

@@ -1,8 +1,12 @@
+{% if target.type == 'duckdb' %}
 {{ config(
     materialized='external',
     location=var('gold_dir') ~ '/dim_tracks.parquet',
     format='parquet'
 ) }}
+{% else %}
+{{ config(materialized='table') }}
+{% endif %}
 
 with tracks as (
     select * from {{ ref('stg_silver_tracks') }}

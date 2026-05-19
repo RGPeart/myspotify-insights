@@ -1,8 +1,12 @@
+{% if target.type == 'duckdb' %}
 {{ config(
     materialized='external',
     location=var('gold_dir') ~ '/fact_audio_features.parquet',
     format='parquet'
 ) }}
+{% else %}
+{{ config(materialized='table') }}
+{% endif %}
 
 with audio as (
     select * from {{ ref('stg_silver_audio_features') }}
