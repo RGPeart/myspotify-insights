@@ -203,9 +203,9 @@ One of the hardest problems in production data engineering is answering "where d
 
 ```python
 # Example: Airflow DAG with OpenLineage instrumentation
-# openlineage-airflow emits events automatically when OPENLINEAGE_URL is set
+# openlineage-airflow emits events automatically when MARQUEZ_URL is set
 # Set in Airflow environment:
-# OPENLINEAGE_URL=http://localhost:5000
+# MARQUEZ_URL=http://localhost:5002
 # OPENLINEAGE_NAMESPACE=myspotify-insights
 
 from airflow import DAG
@@ -251,8 +251,8 @@ log.info(
 
 **Implementation Steps:**
 1. `pip install openlineage-airflow structlog azure-monitor-opentelemetry`
-2. Deploy Marquez via Docker: `docker run -p 5000:5000 marquezproject/marquez`
-3. Set `OPENLINEAGE_URL` in Airflow environment variables
+2. Deploy Marquez via Docker: `docker run -p 5002:5002 marquezproject/marquez`
+3. Set `MARQUEZ_URL` in Airflow environment variables
 4. Replace logging calls with `structlog` throughout codebase
 5. Configure Azure Monitor workspace and set connection string
 6. Add lineage graph panel to dashboard using Marquez `/api/v1/lineage` endpoint
@@ -1109,7 +1109,7 @@ def fetch_daily_costs(subscription_id: str, resource_group: str, token: str) -> 
 - [ ] FastAPI service with 4 core endpoints
 - [ ] API deployed to Azure App Service
 - [ ] OpenAPI documentation live
-- [ ] Marquez deployed (Docker or cloud) and `OPENLINEAGE_URL` configured
+- [ ] Marquez deployed (Docker or cloud) and `MARQUEZ_URL` configured
 - [ ] All Airflow DAGs instrumented with `openlineage-airflow` provider
 - [ ] Lineage graph visible in Marquez UI showing full bronze → gold flow
 - [ ] Azure Monitor workspace configured; structured logs forwarded
