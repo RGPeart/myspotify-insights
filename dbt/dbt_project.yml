@@ -1,0 +1,30 @@
+name: 'spotify_gold'
+version: '1.0.0'
+config-version: 2
+
+profile: 'spotify_gold'
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+analysis-paths: ["analyses"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+vars:
+  # Override at the CLI with --vars '{"silver_dir": "/opt/airflow/data/silver"}'
+  silver_dir: "data/silver"
+  gold_dir: "data/gold"
+
+models:
+  spotify_gold:
+    staging:
+      +materialized: view
+    gold:
+      +materialized: external
+      +format: parquet

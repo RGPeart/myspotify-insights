@@ -40,5 +40,9 @@ structlog>=24.0.0
 apache-airflow-providers-openlineage>=2.0.0
 azure-monitor-opentelemetry>=1.6.0
 
+# Transformation (gold layer)
+dbt-core>=1.7.0
+dbt-duckdb>=1.7.0
+
 # Utils
 requests>=2.31.0

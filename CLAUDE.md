@@ -78,16 +78,18 @@ src/etl/silver_to_gold.py          → data/gold/     (aggregated, feature-engin
 - Categorizes genres via ordered substring matching in `_GENRE_PATTERNS` (most-specific first; "pop" is intentionally the catch-all tail)
 - Quality gate: `assert_quality(report)` raises `DataQualityError` before writing Parquet if checks fail
 
-### Silver → Gold (`src/etl/silver_to_gold.py`)
-- Builds `dim_tracks` with composite popularity: `0.6 × track_pop/100 + 0.4 × artist_pop/100`
-- Unmatched artist join rows get `primary_genre = "unknown"`; artist popularity fill uses column median (falls back to 0 when all are absent)
-- Fails fast if silver tracks table is missing or empty
-- Quality gate: `assert_quality(report)` raises `DataQualityError` before writing Parquet if checks fail
+### Silver → Gold (dbt project at `dbt/`)
+- Implemented in dbt + DuckDB; replaces the legacy `src/etl/silver_to_gold.py` (kept in-tree for reference but no longer invoked by the DAG).
+- Staging models (`stg_silver_*`) are views over the silver Parquet files via DuckDB's `read_parquet()`.
+- Gold models use `materialized='external'` with `format='parquet'` so outputs land in `data/gold/*.parquet` exactly where the API and dashboard already read from.
+- `dim_tracks` recreates the pandas composite-popularity semantics in SQL: `0.6 × track_popularity/100 + 0.4 × artist_popularity/100`, clipped to [0, 1], with artist popularity median-imputed for unmatched rows.
+- Tests in `dbt/models/*/schema.yml` cover `unique`, `not_null`, and `dbt_utils.accepted_range` on key columns.
+- `silver_dir` and `gold_dir` are dbt vars defaulting to `data/silver` and `data/gold`; override in Airflow with `--vars '{"silver_dir": "/opt/airflow/data/silver", ...}'`.
 
 ### Airflow DAG (`dags/spotify_etl_dag.py`)
 - DAG ID: `spotify_etl_pipeline`; no schedule (manual trigger only); `catchup=False`
-- Three tasks in sequence: `_ingest_data` → `_bronze_to_silver` → `_silver_to_gold`; each has `retries=2, retry_delay=1m, execution_timeout=1h`
-- Each task calls the corresponding Python module directly (`SpotifyIngestionClient().ingest()`, `bronze_to_silver.run()`, `silver_to_gold.run()`)
+- Tasks in sequence: `_ingest_data` → `_bronze_to_silver` → `dbt_deps` → `dbt_run_gold` → `dbt_test_gold`
+- Python tasks (`_ingest_data`, `_bronze_to_silver`) have `retries=2, retry_delay=1m, execution_timeout=1h`; dbt tasks use `BashOperator` against `/opt/airflow/dbt` (mounted by docker-compose).
 - `dags/.airflowignore` excludes `test_dag.py` from the scheduler
 
 ## Branching Strategy
