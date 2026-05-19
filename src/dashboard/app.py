@@ -270,7 +270,7 @@ with st.spinner("Querying Marquez..."):
             jobs_df = pd.DataFrame([
                 {
                     "job": j.get("name"),
-                    "namespace": j.get("namespace", {}).get("name", ""),
+                    "namespace": j.get("namespace", ""),
                     "latest_run": j.get("latestRun", {}).get("state", "N/A") if j.get("latestRun") else "N/A",
                     "updated_at": j.get("updatedAt", "N/A"),
                 }

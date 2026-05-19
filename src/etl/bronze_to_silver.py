@@ -129,7 +129,7 @@ def transform_audio_features(raw: list[dict]) -> pd.DataFrame:
     df = df.dropna(subset=["danceability", "energy", "tempo"])
     dropped = before - len(df)
     if dropped:
-        logger.warning("Dropped %d audio_features row(s) with null danceability/energy/tempo", dropped)
+        logger.warning("Dropped_audio_features_rows_with_null_danceability/energy/tempo", count=dropped)
 
     df = df.drop_duplicates(subset=["track_id"], keep="first")
 

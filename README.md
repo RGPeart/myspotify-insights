@@ -161,7 +161,7 @@ The **Streamlit dashboard** includes a static pipeline topology diagram and a li
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENLINEAGE_URL` | `http://marquez:5002` | Marquez API URL (inside Docker network) |
+| `MARQUEZ_URL` | `http://marquez:5002` | Marquez API URL (inside Docker network) |
 | `OPENLINEAGE_NAMESPACE` | `myspotify-insights` | Namespace grouping all jobs and datasets |
 | `MARQUEZ_URL` | `http://localhost:5002` | Marquez API URL for the dashboard (outside Docker) |
 
