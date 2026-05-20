@@ -1,3 +1,6 @@
+# TODO: remove this module once the dbt + DuckDB gold layer (see dbt/) has run
+# end-to-end in production. Retained temporarily for reference only; the Airflow
+# DAG no longer invokes it.
 from pathlib import Path
 
 import pandas as pd

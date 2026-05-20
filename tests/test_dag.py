@@ -21,7 +21,6 @@ def dag_module():
     # Stub heavy imports before loading the DAG file.
     patched_sys = [
         "src.etl.bronze_to_silver",
-        "src.etl.silver_to_gold",
         "src.ingestion.spotify_client",
     ]
     originals = {k: sys.modules.get(k) for k in patched_sys}
@@ -29,10 +28,6 @@ def dag_module():
     b2s_mod = types.ModuleType("src.etl.bronze_to_silver")
     b2s_mod.run = MagicMock(return_value={"tracks": DataQualityReport("tracks", 10)})
     sys.modules["src.etl.bronze_to_silver"] = b2s_mod
-
-    s2g_mod = types.ModuleType("src.etl.silver_to_gold")
-    s2g_mod.run = MagicMock(return_value={"dim_tracks": DataQualityReport("dim_tracks", 10)})
-    sys.modules["src.etl.silver_to_gold"] = s2g_mod
 
     ingestion_mod = types.ModuleType("src.ingestion.spotify_client")
     mock_client = MagicMock()
@@ -48,9 +43,7 @@ def dag_module():
     # the already-loaded src.etl package so the lazy imports hit the mocks.
     import src.etl as _etl_pkg
     _etl_b2s_orig = getattr(_etl_pkg, "bronze_to_silver", None)
-    _etl_s2g_orig = getattr(_etl_pkg, "silver_to_gold", None)
     _etl_pkg.bronze_to_silver = b2s_mod
-    _etl_pkg.silver_to_gold = s2g_mod
 
     dag_path = pathlib.Path(__file__).parent.parent / "dags" / "spotify_etl_dag.py"
     spec = importlib.util.spec_from_file_location("spotify_etl_dag", dag_path)
@@ -58,7 +51,6 @@ def dag_module():
     spec.loader.exec_module(mod)
 
     mod.bronze_to_silver = b2s_mod
-    mod.silver_to_gold = s2g_mod
     mod.SpotifyIngestionClient = ingestion_mod.SpotifyIngestionClient
 
     yield mod
@@ -73,11 +65,6 @@ def dag_module():
         _etl_pkg.bronze_to_silver = _etl_b2s_orig
     elif hasattr(_etl_pkg, "bronze_to_silver"):
         delattr(_etl_pkg, "bronze_to_silver")
-
-    if _etl_s2g_orig is not None:
-        _etl_pkg.silver_to_gold = _etl_s2g_orig
-    elif hasattr(_etl_pkg, "silver_to_gold"):
-        delattr(_etl_pkg, "silver_to_gold")
 
 
 # ---------------------------------------------------------------------------
@@ -101,9 +88,13 @@ class TestDagStructure:
     def test_task_ordering(self, dag_module):
         ingest = dag_module.dag.get_task("_ingest_data")
         b2s = dag_module.dag.get_task("_bronze_to_silver")
-        s2g = dag_module.dag.get_task("_silver_to_gold")
+        dbt_deps = dag_module.dag.get_task("dbt_deps")
+        dbt_run = dag_module.dag.get_task("dbt_run_gold")
+        dbt_test = dag_module.dag.get_task("dbt_test_gold")
         assert b2s.task_id in {t.task_id for t in ingest.downstream_list}
-        assert s2g.task_id in {t.task_id for t in b2s.downstream_list}
+        assert dbt_deps.task_id in {t.task_id for t in b2s.downstream_list}
+        assert dbt_run.task_id in {t.task_id for t in dbt_deps.downstream_list}
+        assert dbt_test.task_id in {t.task_id for t in dbt_run.downstream_list}
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +112,7 @@ class TestDagTaskCallables:
         dag_module._bronze_to_silver.function()
         dag_module.bronze_to_silver.run.assert_called_once()
 
-    def test_silver_to_gold_task_callable(self, dag_module):
-        dag_module.silver_to_gold.run.reset_mock()
-        dag_module._silver_to_gold.function()
-        dag_module.silver_to_gold.run.assert_called_once()
+    def test_dbt_tasks_invoke_dbt(self, dag_module):
+        for task_id in ("dbt_deps", "dbt_run_gold", "dbt_test_gold"):
+            task = dag_module.dag.get_task(task_id)
+            assert "dbt" in task.bash_command

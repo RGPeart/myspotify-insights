@@ -18,9 +18,10 @@ This guide walks you through setting up and running every part of the MySpotify 
 10. [Feature 4 — REST API](#10-feature-4--rest-api) *(coming soon)*
 11. [Feature 5 — Analytics Dashboard](#11-feature-5--analytics-dashboard) *(coming soon)*
 12. [Feature 6 — Observability & Data Lineage](#12-feature-6--observability--data-lineage)
-13. [Running Tests](#13-running-tests)
-14. [Optional: Azure Cloud Storage](#14-optional-azure-cloud-storage)
-15. [Troubleshooting](#15-troubleshooting)
+13. [Feature 7 — SQL Transformation Layer (dbt + DuckDB)](#13-feature-7--sql-transformation-layer-dbt--duckdb)
+14. [Running Tests](#14-running-tests)
+15. [Optional: Azure Cloud Storage](#15-optional-azure-cloud-storage)
+16. [Troubleshooting](#16-troubleshooting)
 
 ---
 
@@ -204,9 +205,12 @@ Start Airflow with Docker Compose (see [Running the pipeline](#running-the-pipel
 # Stage 1: Bronze → Silver
 python -m src.etl.bronze_to_silver
 
-# Stage 2: Silver → Gold
-python -m src.etl.silver_to_gold
+# Stage 2: Silver → Gold — now handled by dbt (see Feature 7 below)
+#   The legacy python module `src.etl.silver_to_gold` still exists for reference
+#   but is no longer invoked by the DAG. Use dbt for the gold layer.
 ```
+
+> **Note:** As of Feature 7, the Silver → Gold transformation is implemented in dbt + DuckDB, not pandas. See [Feature 7 — SQL Transformation Layer](#13-feature-7--sql-transformation-layer-dbt--duckdb) for how to run it.
 
 ### What Bronze → Silver does
 
@@ -379,7 +383,159 @@ curl "http://localhost:5002/api/v1/namespaces/myspotify-insights/jobs" | python 
 
 ---
 
-## 13. Running Tests
+## 13. Feature 7 — SQL Transformation Layer (dbt + DuckDB)
+
+**What it does:** Replaces the Silver → Gold pandas transform with a dbt project backed by DuckDB. Gold tables (`dim_tracks`, `dim_artists`, `fact_audio_features`) are now defined in SQL, version-controlled, and validated by 35 generic tests (`unique`, `not_null`, `dbt_utils.accepted_range`). Outputs land in `data/gold/*.parquet` exactly where the API and dashboard read from, so nothing downstream needs to change.
+
+You must complete Feature 1 (ingestion) and Feature 2's Bronze → Silver stage first so there is data in `data/silver/` for dbt to read.
+
+### One-time setup
+
+`dbt-core` and `dbt-duckdb` are already in `requirements.txt`, so they were installed in step 4. You only need to install the `dbt_utils` package:
+
+```bash
+cd dbt
+dbt deps --profiles-dir .
+cd ..
+```
+
+This reads `dbt/packages.yml` and pins `dbt_utils@1.3.3` via `dbt/package-lock.yml`.
+
+### Build the gold models
+
+Run from the **repo root**, with the venv active:
+
+**Windows (PowerShell):**
+
+```powershell
+cd dbt
+$repo = (Resolve-Path ..).Path
+$env:DBT_DUCKDB_PATH = "$repo\data\spotify.duckdb"
+$vars = "{silver_dir: '$($repo -replace '\\','/')/data/silver', gold_dir: '$($repo -replace '\\','/')/data/gold'}"
+dbt run  --profiles-dir . --vars $vars
+dbt test --profiles-dir . --vars $vars
+```
+
+**macOS / Linux:**
+
+```bash
+cd dbt
+export DBT_DUCKDB_PATH="$PWD/../data/spotify.duckdb"
+VARS="{silver_dir: '$PWD/../data/silver', gold_dir: '$PWD/../data/gold'}"
+dbt run  --profiles-dir . --vars "$VARS"
+dbt test --profiles-dir . --vars "$VARS"
+```
+
+Why pass absolute paths? DuckDB's `read_parquet()` resolves relative paths against the current working directory, so the dbt vars must point to the silver/gold folders in absolute terms regardless of where you invoke `dbt`.
+
+### Expected output
+
+```
+Done. PASS=6 WARN=0 ERROR=0 SKIP=0 NO-OP=0 TOTAL=6     ← dbt run
+Done. PASS=35 WARN=0 ERROR=0 SKIP=0 NO-OP=0 TOTAL=35   ← dbt test
+```
+
+After `dbt run` you will have:
+
+| Artifact | Description |
+|---|---|
+| `data/spotify.duckdb` | DuckDB database (views over the gold Parquet) |
+| `data/gold/dim_tracks.parquet` | Track dimension with composite popularity score |
+| `data/gold/dim_artists.parquet` | Artist dimension |
+| `data/gold/fact_audio_features.parquet` | Audio features fact table |
+
+### Verify it worked
+
+```bash
+python -c "
+import duckdb
+con = duckdb.connect('data/spotify.duckdb', read_only=True)
+print('dim_tracks rows:', con.execute('SELECT count(*) FROM dim_tracks').fetchone()[0])
+print(con.execute('SELECT primary_genre, count(*) FROM dim_tracks GROUP BY 1 ORDER BY 2 DESC LIMIT 5').fetchdf())
+"
+```
+
+You can also browse `data/spotify.duckdb` with any DuckDB client (DuckDB CLI, DBeaver, VS Code DuckDB extension).
+
+### Run via Airflow (recommended for the full pipeline)
+
+The `spotify_etl_pipeline` DAG runs dbt automatically after Bronze → Silver:
+
+```
+_ingest_data → _bronze_to_silver → dbt_deps → dbt_run_gold → dbt_test_gold
+```
+
+The Airflow image already has `dbt-core` and `dbt-duckdb` installed; `docker-compose.yaml` mounts `./dbt → /opt/airflow/dbt`. No extra setup is needed beyond `docker compose up -d`.
+
+### Browse the lineage graph (optional)
+
+dbt generates an interactive lineage DAG of the SQL models:
+
+```bash
+cd dbt
+dbt docs generate --profiles-dir .
+dbt docs serve    --profiles-dir . --port 18080   # opens http://localhost:18080 (8080 is Airflow)
+```
+
+This complements the Marquez lineage from Feature 6 — Marquez shows task-level Airflow lineage, dbt shows model-level SQL lineage within the gold layer.
+
+### Switching the warehouse to Postgres (future)
+
+dbt is wired to support two targets — `prod` (DuckDB, default) and `pg` (Postgres) — so you can flip the gold warehouse without changing any model code. The Airflow Connection-to-dbt plumbing is already in place; you only need to enable it.
+
+**Step 1 — Provision a Postgres database.** Either reuse the existing `postgres` service from `docker-compose.yaml` (create a `gold` database alongside the `airflow` one) or stand up a separate Postgres. Make sure it's reachable from the Airflow worker container.
+
+**Step 2 — Register an Airflow Connection.** From the Airflow CLI:
+
+```bash
+docker compose exec airflow-apiserver airflow connections add dbt_postgres \
+    --conn-type postgres \
+    --conn-host        <hostname-reachable-from-airflow> \
+    --conn-port        5432 \
+    --conn-login       <username> \
+    --conn-password    <password> \
+    --conn-schema      <database-name>
+```
+
+(`--conn-schema` here is Airflow's term for the **database** name, not the Postgres schema. The Postgres schema is set separately via `DBT_PG_SCHEMA`.)
+
+Or in the Airflow UI: **Admin → Connections → Add**, with `Connection Id = dbt_postgres` and `Conn Type = Postgres`.
+
+**Step 3 — Flip the target.** In your `.env`:
+
+```
+DBT_TARGET=pg
+DBT_PG_CONN_ID=dbt_postgres
+DBT_PG_SCHEMA=gold
+```
+
+Then `docker compose up -d --force-recreate airflow-apiserver airflow-scheduler airflow-worker` to pick up the new env vars.
+
+**Step 4 — Trigger the DAG.** `dbt_run_gold` and `dbt_test_gold` will now build `dim_tracks`, `dim_artists`, and `fact_audio_features` as Postgres **tables** under the `gold` schema. The gold model SQL automatically switches materialisation based on `target.type` (external Parquet on DuckDB, regular tables on Postgres).
+
+**Known limitation:** the staging models still read silver Parquet via DuckDB's `read_parquet()`, which Postgres cannot do. To run end-to-end against Postgres you'll need to first load `data/silver/*.parquet` into the Postgres database (via a separate Airflow task using `pandas.read_parquet` + `to_sql`, or via `COPY FROM`). The gold transformation itself works as-is once the staging tables exist.
+
+---
+
+### Re-running and idempotency
+
+`dbt run` is idempotent: re-running over the same silver data overwrites the Parquet outputs and recreates the DuckDB views. There is no need to delete `data/spotify.duckdb` between runs.
+
+To rebuild only a single model:
+
+```bash
+dbt run --profiles-dir . --vars "$VARS" --select dim_tracks
+```
+
+To rebuild a model plus everything that depends on it:
+
+```bash
+dbt run --profiles-dir . --vars "$VARS" --select +dim_tracks+
+```
+
+---
+
+## 14. Running Tests
 
 The test suite covers the data quality framework, all ETL transforms, and the pipeline orchestration.
 
@@ -401,7 +557,7 @@ All tests are in-memory and do not require real Spotify credentials or actual da
 
 ---
 
-## 14. Optional: Azure Cloud Storage
+## 15. Optional: Azure Cloud Storage
 
 By default, all data is stored locally under the `data/` folder. If you want to mirror data to Azure Blob Storage:
 
@@ -419,7 +575,7 @@ When valid Azure credentials are present, the ingestion script will automaticall
 
 ---
 
-## 15. Troubleshooting
+## 16. Troubleshooting
 
 ### `ModuleNotFoundError: No module named 'src'`
 
@@ -459,6 +615,37 @@ Make sure your virtual environment is active (`(venv)` in prompt) and dependenci
 ```bash
 pip install -r requirements.txt
 ```
+
+### `dbt` complains about a missing profile
+
+You forgot `--profiles-dir .`. The project's `profiles.yml` lives in `dbt/`, not the default `~/.dbt/` location, so every dbt command must be told where to find it:
+
+```bash
+dbt run --profiles-dir . ...
+```
+
+### `dbt run` errors with `IO Error: Cannot open file ".../dbt/data/spotify.duckdb"`
+
+DuckDB resolved the database path relative to the dbt project dir. Set `DBT_DUCKDB_PATH` to an absolute path before running:
+
+```powershell
+$env:DBT_DUCKDB_PATH = "$((Resolve-Path ..).Path)\data\spotify.duckdb"   # PowerShell
+```
+```bash
+export DBT_DUCKDB_PATH="$PWD/../data/spotify.duckdb"                       # bash/zsh
+```
+
+### `dbt run` errors with `IO Error: No files found that match the pattern ...silver/tracks.parquet`
+
+The silver layer hasn't been built yet. Run Feature 2's Bronze → Silver stage first:
+
+```bash
+python -m src.etl.bronze_to_silver
+```
+
+### `Compilation Error: 'dbt_utils' is undefined`
+
+Run `dbt deps --profiles-dir .` once from inside `dbt/` to install the `dbt_utils` package.
 
 ## XX. Claude Code Setup (Optional)
 

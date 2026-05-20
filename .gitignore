@@ -234,8 +234,8 @@ data/silver/*
 data/gold/*
 !data/*/.gitkeep
 
-# Generated model artifacts
-models/
+# Generated model artifacts (ML pickles at repo root, not dbt/models)
+/models/
 *.pkl
 
 # Secrets and config
@@ -248,3 +248,11 @@ config/secrets.yaml
 
 # Logs
 logs/
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+dbt/.user.yml
+*.duckdb
+*.duckdb.wal
