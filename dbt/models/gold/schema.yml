@@ -1,0 +1,93 @@
+version: 2
+
+models:
+  - name: dim_tracks
+    description: "Gold track dimension — composite popularity (0.6 × track_pop + 0.4 × artist_pop), genre annotation, album metadata."
+    columns:
+      - name: track_id
+        description: "Spotify track ID — primary key."
+        tests:
+          - unique
+          - not_null
+      - name: name
+        tests:
+          - not_null
+      - name: track_popularity
+        description: "Track popularity 0–100 as reported by Spotify."
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: composite_popularity
+        description: "Weighted score: 60% track_popularity + 40% artist_popularity (median-imputed when missing), clipped to [0, 1]."
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: primary_genre
+        description: "Genre category inherited from the primary artist; 'unknown' when no artist match."
+        tests:
+          - not_null
+
+  - name: dim_artists
+    description: "Gold artist dimension — popularity, follower count, genre."
+    columns:
+      - name: artist_id
+        description: "Spotify artist ID — primary key."
+        tests:
+          - unique
+          - not_null
+      - name: artist_name
+        tests:
+          - not_null
+      - name: popularity
+        description: "Artist popularity 0–100."
+        tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: primary_genre
+        tests:
+          - not_null
+
+  - name: fact_audio_features
+    description: "Fact table of normalized audio features per track, joined to track/artist/album keys."
+    columns:
+      - name: track_id
+        description: "FK → dim_tracks.track_id; primary key for this fact table."
+        tests:
+          - unique
+          - not_null
+      - name: primary_artist_id
+        description: "FK → dim_artists.artist_id. Expected non-null: every audio feature row should match a track row carrying an artist id."
+        tests:
+          - not_null
+      - name: album_id
+        description: "Album identifier from dim_tracks. Expected non-null for the same reason as primary_artist_id."
+        tests:
+          - not_null
+      - name: danceability
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: energy
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: tempo
+        tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
