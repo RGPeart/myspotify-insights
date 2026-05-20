@@ -67,6 +67,7 @@ with DAG(
         task_id="dbt_deps",
         bash_command=f"cd {DBT_PROJECT_DIR} && dbt deps --profiles-dir .",
         retries=1,
+        retry_delay=timedelta(minutes=1),
         execution_timeout=timedelta(minutes=10),
     )
 

@@ -62,6 +62,14 @@ models:
         tests:
           - unique
           - not_null
+      - name: primary_artist_id
+        description: "FK → dim_artists.artist_id. Expected non-null: every audio feature row should match a track row carrying an artist id."
+        tests:
+          - not_null
+      - name: album_id
+        description: "Album identifier from dim_tracks. Expected non-null for the same reason as primary_artist_id."
+        tests:
+          - not_null
       - name: danceability
         tests:
           - not_null

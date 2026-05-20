@@ -173,7 +173,7 @@ duckdb data/spotify.duckdb -c "SELECT primary_genre, count(*) FROM dim_tracks GR
 ```bash
 cd dbt
 dbt docs generate --profiles-dir .
-dbt docs serve    --profiles-dir .   # opens http://localhost:8080
+dbt docs serve    --profiles-dir . --port 18080   # opens http://localhost:18080 (8080 is Airflow)
 ```
 
 The dbt docs site complements the OpenLineage/Marquez graph from Feature 6: Marquez shows job-level Airflow lineage; dbt shows model-level SQL lineage within the gold layer.

@@ -474,7 +474,7 @@ dbt generates an interactive lineage DAG of the SQL models:
 ```bash
 cd dbt
 dbt docs generate --profiles-dir .
-dbt docs serve    --profiles-dir .   # opens http://localhost:8080
+dbt docs serve    --profiles-dir . --port 18080   # opens http://localhost:18080 (8080 is Airflow)
 ```
 
 This complements the Marquez lineage from Feature 6 — Marquez shows task-level Airflow lineage, dbt shows model-level SQL lineage within the gold layer.
