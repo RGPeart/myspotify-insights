@@ -37,4 +37,4 @@ select
     a.mode,
     a.duration_ms
 from audio a
-left join track_keys t on a.track_id = t.track_id
+inner join track_keys t on a.track_id = t.track_id

@@ -33,7 +33,10 @@ DBT_VARS = '{"silver_dir": "/opt/airflow/data/silver", "gold_dir": "/opt/airflow
 # Switch the dbt target via env var on the Airflow image:
 #   DBT_TARGET=prod   → DuckDB (default)
 #   DBT_TARGET=pg     → Postgres, credentials pulled from Airflow Connection $DBT_PG_CONN_ID
+_ALLOWED_TARGETS = {"prod", "dev", "pg"}
 DBT_TARGET = os.environ.get("DBT_TARGET", "prod")
+if DBT_TARGET not in _ALLOWED_TARGETS:
+    raise ValueError(f"DBT_TARGET must be one of {_ALLOWED_TARGETS}, instead received {DBT_TARGET!r}")
 DBT_PG_CONN_ID = os.environ.get("DBT_PG_CONN_ID", "dbt_postgres")
 
 # When targeting Postgres, project Airflow Connection fields into env vars that
@@ -93,6 +96,7 @@ with DAG(
         env=DBT_ENV,
         append_env=True,
         retries=1,
+        retry_delay=timedelta(minutes=1),
         execution_timeout=timedelta(minutes=30),
     )
 
