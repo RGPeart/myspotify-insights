@@ -4,6 +4,9 @@ spotify:
   backoff_base_seconds: 1.0
   # Time ranges to pull from /me/top/{type}. Spotify supports short_term
   # (~4 weeks), medium_term (~6 months), long_term (years).
+  # long_term is deliberately omitted: recent taste is the signal for the
+  # recommender; lifetime averages drown out personalisation. See
+  # docs/decisions/2026-06-08.md § 1.
   top_time_ranges:
     - short_term
     - medium_term

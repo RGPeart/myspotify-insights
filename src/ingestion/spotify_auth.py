@@ -59,4 +59,19 @@ def get_authenticated_client() -> spotipy.Spotify:
     }
     cache_handler = MemoryCacheHandler(token_info=token_info)
     oauth = build_oauth(open_browser=False, cache_handler=cache_handler)
-    return spotipy.Spotify(auth_manager=oauth)
+    client = spotipy.Spotify(auth_manager=oauth)
+
+    # Force an immediate refresh + auth check so a revoked/invalid token surfaces
+    # here with an actionable message, rather than as an opaque SpotifyException
+    # deep inside the first ingest call.
+    try:
+        client.current_user()
+    except spotipy.SpotifyException as exc:
+        raise RuntimeError(
+            "SPOTIFY_REFRESH_TOKEN was rejected by Spotify "
+            f"(status={exc.http_status}). The token may have been revoked or the "
+            "granted scopes changed. Re-run `python -m src.ingestion.spotify_auth_login` "
+            "and update your .env."
+        ) from exc
+
+    return client

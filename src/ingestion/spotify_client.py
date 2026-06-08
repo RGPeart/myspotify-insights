@@ -98,13 +98,13 @@ class SpotifyIngestionClient:
             if artists:
                 self._save_to_bronze(artists, "user_top_artists", partition=time_range)
                 for a in artists:
-                    top_artists_by_id.setdefault(a["id"], a)
+                    _merge_artist(top_artists_by_id, a)
 
         followed = self._fetch_followed_artists(self.FOLLOWED_LIMIT)
         if followed:
             self._save_to_bronze(followed, "followed_artists")
             for a in followed:
-                top_artists_by_id.setdefault(a["id"], a)
+                _merge_artist(top_artists_by_id, a)
 
         # 2. Decide which genres drive catalog expansion
         if genres is not None:
@@ -382,6 +382,13 @@ class SpotifyIngestionClient:
         """
         if not records:
             return None
+        if partition is not None and (
+            not partition
+            or "/" in partition
+            or "\\" in partition
+            or partition.startswith(".")
+        ):
+            raise ValueError(f"Invalid partition value: {partition!r}")
         now_utc = datetime.now(timezone.utc)
         timestamp = now_utc.strftime("%Y%m%dT%H%M%SZ")
         date_str = now_utc.strftime("%Y-%m-%d")
@@ -466,11 +473,24 @@ def _batched(items: list, size: int):
         yield items[i : i + size]
 
 
+def _merge_artist(by_id: dict[str, dict], artist: dict) -> None:
+    """Insert ``artist`` into ``by_id``, unioning ``genres`` if an entry already exists.
+
+    The same artist often appears in multiple time-range top lists and in the
+    followed-artists list with slightly different genre tags. A plain
+    ``setdefault`` would drop the later genres; this helper preserves them so
+    genre derivation sees the full picture.
+    """
+    existing = by_id.get(artist["id"])
+    if existing is None:
+        by_id[artist["id"]] = artist
+        return
+    merged_genres = list(dict.fromkeys((existing.get("genres") or []) + (artist.get("genres") or [])))
+    existing["genres"] = merged_genres
+
+
 def _fallback_genres() -> list[str]:
-    return _CONFIG.get("spotify", {}).get(
-        "fallback_genres",
-        ["pop", "rock", "hip-hop", "electronic", "jazz", "r-n-b", "country", "classical"],
-    )
+    return _CONFIG.get("spotify", {}).get("fallback_genres", [])
 
 
 if __name__ == "__main__":

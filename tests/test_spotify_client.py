@@ -784,3 +784,81 @@ class TestIngestPersonalDataFlow:
 
         # a1 came from top_artists; no need to call /artists for it.
         mock_sp.artists.assert_not_called()
+
+
+# ------------------------------------------------------------------ #
+# Artist merge across time-ranges / followed                           #
+# ------------------------------------------------------------------ #
+
+class TestArtistMerge:
+    # If the same artist appears in short_term, medium_term, and followed lists with
+    # different genres, all genres must be unioned so genre derivation sees the full
+    # picture instead of whatever the first list happened to include.
+    def test_merges_genres_across_time_ranges_and_followed(self, client, tmp_path):
+        c, mock_sp, _ = client
+        mock_sp.current_user.return_value = None
+        # short_term has the artist with one genre, medium_term with another,
+        # followed adds a third. All must contribute to the derived genre seeds.
+        mock_sp.current_user_top_artists.side_effect = [
+            {"items": [make_artist("a1", ["synthwave"])]},
+            {"items": [make_artist("a1", ["indie pop"])]},
+        ]
+        mock_sp.current_user_top_tracks.return_value = {"items": []}
+        mock_sp.current_user_followed_artists.return_value = {
+            "artists": {"items": [make_artist("a1", ["dream pop"])]}
+        }
+        captured_genres: list[list[str]] = []
+
+        def fake_search(**kwargs):
+            captured_genres.append(kwargs.get("q", ""))
+            return {"tracks": {"items": []}}
+
+        mock_sp.search.side_effect = fake_search
+        mock_sp.artists.return_value = {"artists": []}
+        c._fetch_audio_features = lambda ids: []
+
+        c.ingest(tracks_per_genre=1)
+
+        # All three genres should have been used to search.
+        joined = " ".join(captured_genres)
+        for g in ("synthwave", "indie pop", "dream pop"):
+            assert g in joined
+
+
+# ------------------------------------------------------------------ #
+# Partition validation                                                 #
+# ------------------------------------------------------------------ #
+
+class TestPartitionValidation:
+    # Path separators in partition would let a future caller escape the bronze tree;
+    # the saver must reject them up-front.
+    @pytest.mark.parametrize("bad", ["../etc", "..", "a/b", "a\\b", ".hidden", ""])
+    def test_rejects_invalid_partition(self, client, bad):
+        c, _, _ = client
+        with pytest.raises(ValueError, match="partition"):
+            c._save_to_bronze([{"id": "x"}], "user_top_tracks", partition=bad)
+
+    # A normal time_range partition must continue to work.
+    def test_accepts_valid_partition(self, client):
+        c, _, _ = client
+        path = c._save_to_bronze([{"id": "x"}], "user_top_tracks", partition="short_term")
+        assert path is not None
+        assert "short_term" in path.parts
+
+
+# ------------------------------------------------------------------ #
+# Fallback genres single source of truth                               #
+# ------------------------------------------------------------------ #
+
+class TestFallbackGenresFromConfig:
+    # The fallback list must come solely from config; if config has none, the function
+    # returns an empty list rather than a stale hardcoded default.
+    def test_returns_empty_when_config_missing(self, monkeypatch):
+        from src.ingestion import spotify_client as m
+        monkeypatch.setattr(m, "_CONFIG", {})
+        assert m._fallback_genres() == []
+
+    def test_returns_config_value(self, monkeypatch):
+        from src.ingestion import spotify_client as m
+        monkeypatch.setattr(m, "_CONFIG", {"spotify": {"fallback_genres": ["techno"]}})
+        assert m._fallback_genres() == ["techno"]

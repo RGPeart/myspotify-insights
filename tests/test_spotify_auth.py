@@ -1,4 +1,5 @@
 import pytest
+import spotipy
 from unittest.mock import patch
 
 from src.ingestion import spotify_auth
@@ -42,3 +43,15 @@ class TestGetAuthenticatedClient:
         scope_str = mock_oauth.call_args.kwargs["scope"]
         for s in ("user-top-read", "user-follow-read", "user-read-private"):
             assert s in scope_str
+
+    # A revoked or invalid refresh token must surface here with an actionable message
+    # pointing at the login script, not as an opaque SpotifyException mid-ingest.
+    def test_wraps_revoked_token_with_actionable_message(self, env, monkeypatch):
+        monkeypatch.setenv("SPOTIFY_REFRESH_TOKEN", "rt-revoked")
+        with patch("src.ingestion.spotify_auth.SpotifyOAuth"), \
+             patch("src.ingestion.spotify_auth.spotipy.Spotify") as mock_sp_cls:
+            mock_sp_cls.return_value.current_user.side_effect = spotipy.SpotifyException(
+                401, -1, "invalid refresh token"
+            )
+            with pytest.raises(RuntimeError, match="spotify_auth_login"):
+                spotify_auth.get_authenticated_client()
