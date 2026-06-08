@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import time
 import yaml
@@ -10,9 +9,9 @@ import requests
 import spotipy
 from azure.core.exceptions import AzureError
 from dotenv import load_dotenv
-from spotipy.oauth2 import SpotifyClientCredentials
 
 from src.ingestion.azure_uploader import AzureBlobUploader
+from src.ingestion.spotify_auth import get_authenticated_client
 from src.utils.logging_config import get_logger
 
 load_dotenv()
@@ -37,19 +36,19 @@ MANIFEST_PATH = BRONZE_DIR / "manifest.json"
 
 
 class SpotifyIngestionClient:
-    """Extracts tracks, audio features, and artists from Spotify API into the bronze layer."""
+    """Extracts the authenticated user's listening data and a derived genre-search catalog into the bronze layer."""
 
     _spotify_cfg = _CONFIG.get("spotify", {})
     MAX_RETRIES: int = _spotify_cfg.get("max_retries", 3)
     BACKOFF_BASE: float = _spotify_cfg.get("backoff_base_seconds", 1.0)
     MARKET: str = _spotify_cfg.get("market", "US")
+    TOP_TIME_RANGES: list[str] = _spotify_cfg.get("top_time_ranges", ["short_term", "medium_term"])
+    TOP_LIMIT: int = _spotify_cfg.get("top_limit", 50)
+    FOLLOWED_LIMIT: int = _spotify_cfg.get("followed_artists_limit", 50)
+    DERIVED_GENRES_MAX: int = _spotify_cfg.get("derived_genres_max", 10)
 
     def __init__(self, bronze_dir: Path = BRONZE_DIR) -> None:
-        auth = SpotifyClientCredentials(
-            client_id=os.environ["SPOTIFY_CLIENT_ID"],
-            client_secret=os.environ["SPOTIFY_CLIENT_SECRET"],
-        )
-        self.sp = spotipy.Spotify(auth_manager=auth)
+        self.sp = get_authenticated_client()
         self.bronze_dir = bronze_dir
         self._manifest_path = self.bronze_dir / "manifest.json"
         self._manifest = self._load_manifest()
@@ -66,32 +65,89 @@ class SpotifyIngestionClient:
     # ------------------------------------------------------------------ #
 
     def ingest(self, genres: list[str] | None = None, tracks_per_genre: int | None = None) -> dict:
-        """
-        Run a full ingestion cycle: search tracks by genre → fetch audio features
-        and artist metadata → save new records to the bronze layer.
+        """Run a full ingestion cycle.
 
-        Returns a summary dict: {"tracks": N, "audio_features": N, "artists": N}.
+        Order of operations:
+          1. User profile + per-range top tracks/artists + followed artists → bronze.
+          2. Derive genre seeds from the user's top + followed artists.
+          3. Genre-search expansion using those seeds (or ``genres`` override / fallback).
+          4. Merge top tracks/artists into the standard tracks/artists data types so
+             they flow through silver/gold even if not surfaced by search.
+          5. Audio features (ReccoBeats) + missing artist details + manifest update.
+
+        Returns a summary dict with the counts of bronze records written for
+        the standard tracks / audio_features / artists data types.
         """
-        genres = genres or _default_genres()
         if tracks_per_genre is None:
             tracks_per_genre = _CONFIG.get("ingestion", {}).get("tracks_per_genre", 50)
-        logger.info("Starting ingestion | genres=%s, tracks_per_genre=%d", genres, tracks_per_genre)
 
-        all_tracks = self._fetch_tracks_by_genre(genres, tracks_per_genre)
+        # 1. Personal data
+        profile = self._fetch_user_profile()
+        if profile:
+            self._save_to_bronze([profile], "user_profile")
+
+        top_tracks_by_id: dict[str, dict] = {}
+        top_artists_by_id: dict[str, dict] = {}
+        for time_range in self.TOP_TIME_RANGES:
+            tracks = self._fetch_user_top_items("tracks", time_range, self.TOP_LIMIT)
+            if tracks:
+                self._save_to_bronze(tracks, "user_top_tracks", partition=time_range)
+                for t in tracks:
+                    top_tracks_by_id.setdefault(t["id"], t)
+            artists = self._fetch_user_top_items("artists", time_range, self.TOP_LIMIT)
+            if artists:
+                self._save_to_bronze(artists, "user_top_artists", partition=time_range)
+                for a in artists:
+                    top_artists_by_id.setdefault(a["id"], a)
+
+        followed = self._fetch_followed_artists(self.FOLLOWED_LIMIT)
+        if followed:
+            self._save_to_bronze(followed, "followed_artists")
+            for a in followed:
+                top_artists_by_id.setdefault(a["id"], a)
+
+        # 2. Decide which genres drive catalog expansion
+        if genres is not None:
+            search_genres = genres
+            logger.info("Using %d caller-supplied genres for search: %s", len(search_genres), search_genres)
+        else:
+            search_genres = self._derive_search_genres(list(top_artists_by_id.values()))
+            if search_genres:
+                logger.info("Using %d derived genres for search: %s", len(search_genres), search_genres)
+            else:
+                search_genres = _fallback_genres()
+                logger.info("No genres derivable from user data; using fallback: %s", search_genres)
+
+        # 3. Genre-search catalog expansion
+        search_tracks = self._fetch_tracks_by_genre(search_genres, tracks_per_genre)
+
+        # 4. Merge top tracks into the standard tracks set
+        all_tracks_by_id: dict[str, dict] = {t["id"]: t for t in search_tracks}
+        for tid, t in top_tracks_by_id.items():
+            all_tracks_by_id.setdefault(tid, t)
+        all_tracks = list(all_tracks_by_id.values())
 
         new_track_ids = self._filter_new_ids("tracks", [t["id"] for t in all_tracks])
         new_tracks = [t for t in all_tracks if t["id"] in new_track_ids]
 
         if not new_tracks:
             logger.info("No new tracks to ingest")
+            self._save_manifest()
             return {"tracks": 0, "audio_features": 0, "artists": 0}
 
+        # 5. Audio features for the new track IDs
         track_ids = [t["id"] for t in new_tracks]
-        artist_ids = list({a["id"] for t in new_tracks for a in t.get("artists", [])})
-        new_artist_ids = self._filter_new_ids("artists", artist_ids)
-
         audio_features = self._fetch_audio_features(track_ids)
-        artists = self._fetch_artists(list(new_artist_ids)) if new_artist_ids else []
+
+        # 6. Artists: union of artists referenced by new tracks + top/followed (which we already have full payloads for)
+        artist_ids_from_tracks = {a["id"] for t in new_tracks for a in t.get("artists", [])}
+        candidate_artist_ids = artist_ids_from_tracks | set(top_artists_by_id.keys())
+        new_artist_ids = self._filter_new_ids("artists", list(candidate_artist_ids))
+
+        already_have = {aid: top_artists_by_id[aid] for aid in new_artist_ids if aid in top_artists_by_id}
+        need_to_fetch = [aid for aid in new_artist_ids if aid not in already_have]
+        fetched_artists = self._fetch_artists(need_to_fetch) if need_to_fetch else []
+        artists = list(already_have.values()) + fetched_artists
 
         self._save_to_bronze(new_tracks, "tracks")
         self._save_to_bronze(audio_features, "audio_features")
@@ -150,19 +206,68 @@ class SpotifyIngestionClient:
         return len(features)
 
     # ------------------------------------------------------------------ #
-    # Private fetch methods                                                #
+    # Personal data fetches                                                #
+    # ------------------------------------------------------------------ #
+
+    def _fetch_user_profile(self) -> dict | None:
+        try:
+            return self._call_api(self.sp.current_user)
+        except spotipy.SpotifyException as exc:
+            logger.warning("Failed to fetch user profile: %s", exc)
+            return None
+
+    def _fetch_user_top_items(self, item_type: str, time_range: str, limit: int) -> list[dict]:
+        """Fetch /me/top/{tracks|artists} for a single time_range."""
+        if item_type == "tracks":
+            fn = self.sp.current_user_top_tracks
+        elif item_type == "artists":
+            fn = self.sp.current_user_top_artists
+        else:
+            raise ValueError(f"item_type must be 'tracks' or 'artists', got {item_type!r}")
+        try:
+            result = self._call_api(fn, limit=limit, time_range=time_range)
+        except spotipy.SpotifyException as exc:
+            logger.warning("Failed to fetch top %s (%s): %s", item_type, time_range, exc)
+            return []
+        items = [i for i in (result or {}).get("items", []) if i]
+        logger.info("Fetched %d top %s for time_range=%s", len(items), item_type, time_range)
+        return items
+
+    def _fetch_followed_artists(self, limit: int) -> list[dict]:
+        try:
+            result = self._call_api(self.sp.current_user_followed_artists, limit=limit)
+        except spotipy.SpotifyException as exc:
+            logger.warning("Failed to fetch followed artists: %s", exc)
+            return []
+        items = [i for i in (result or {}).get("artists", {}).get("items", []) if i]
+        logger.info("Fetched %d followed artists", len(items))
+        return items
+
+    def _derive_search_genres(self, artists: list[dict]) -> list[str]:
+        """Return the top N most-common genres across the supplied artists."""
+        counts: dict[str, int] = {}
+        for a in artists:
+            for g in a.get("genres") or []:
+                counts[g] = counts.get(g, 0) + 1
+        ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
+        return [g for g, _ in ranked[: self.DERIVED_GENRES_MAX]]
+
+    # ------------------------------------------------------------------ #
+    # Catalog expansion (genre search) & enrichment                        #
     # ------------------------------------------------------------------ #
 
     def _fetch_tracks_by_genre(self, genres: list[str], tracks_per_genre: int) -> list[dict]:
         seen: dict[str, dict] = {}
         for genre in genres:
+            # Quote multi-word genres so Spotify's parser treats them as a single term.
+            query_genre = f'"{genre}"' if " " in genre else genre
             fetched = 0
             offset = 0
             while fetched < tracks_per_genre:
                 limit = min(50, tracks_per_genre - fetched)
                 result = self._call_api(
                     self.sp.search,
-                    q=f"genre:{genre}",
+                    q=f"genre:{query_genre}",
                     type="track",
                     limit=limit,
                     offset=offset,
@@ -190,7 +295,7 @@ class SpotifyIngestionClient:
         # Short-circuit if no track IDs provided, to avoid unnecessary ReccoBeats calls and log noise.
         if len(track_ids) == 0:
             return []
-        
+
         # Step 1: resolve Spotify IDs → ReccoBeats IDs (max 40 per request)
         rb_id_map: dict[str, str] = {}  # spotify_id → reccobeats_id
         for batch in _batched(track_ids, 40):
@@ -269,15 +374,25 @@ class SpotifyIngestionClient:
     # Bronze layer storage                                                 #
     # ------------------------------------------------------------------ #
 
-    def _save_to_bronze(self, records: list[dict], data_type: str) -> Path | None:
+    def _save_to_bronze(self, records: list[dict], data_type: str, partition: str | None = None) -> Path | None:
+        """Persist records as JSON under bronze/{data_type}[/{partition}]/YYYY-MM-DD/.
+
+        ``partition`` is used for data types that need an extra sub-directory
+        (e.g. the time_range for user_top_tracks).
+        """
         if not records:
             return None
         now_utc = datetime.now(timezone.utc)
         timestamp = now_utc.strftime("%Y%m%dT%H%M%SZ")
         date_str = now_utc.strftime("%Y-%m-%d")
-        dest_dir = self.bronze_dir / data_type / date_str
+        if partition:
+            dest_dir = self.bronze_dir / data_type / partition / date_str
+            prefix = f"{data_type}_{partition}"
+        else:
+            dest_dir = self.bronze_dir / data_type / date_str
+            prefix = data_type
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest_path = dest_dir / f"{data_type}_{timestamp}.json"
+        dest_path = dest_dir / f"{prefix}_{timestamp}.json"
         with open(dest_path, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=2, ensure_ascii=False)
         logger.info("Saved %d %s records -> %s", len(records), data_type, dest_path)
@@ -351,9 +466,9 @@ def _batched(items: list, size: int):
         yield items[i : i + size]
 
 
-def _default_genres() -> list[str]:
+def _fallback_genres() -> list[str]:
     return _CONFIG.get("spotify", {}).get(
-        "default_genres",
+        "fallback_genres",
         ["pop", "rock", "hip-hop", "electronic", "jazz", "r-n-b", "country", "classical"],
     )
 
