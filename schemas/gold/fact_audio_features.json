@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "track_id": {
+      "title": "Track Id",
+      "type": "string"
+    },
+    "primary_artist_id": {
+      "title": "Primary Artist Id",
+      "type": "string"
+    },
+    "album_id": {
+      "title": "Album Id",
+      "type": "string"
+    },
+    "danceability": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Danceability",
+      "type": "number"
+    },
+    "energy": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Energy",
+      "type": "number"
+    },
+    "valence": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Valence"
+    },
+    "tempo": {
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Tempo",
+      "type": "number"
+    },
+    "key": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Key"
+    },
+    "loudness": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Loudness"
+    },
+    "time_signature": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Time Signature"
+    },
+    "speechiness": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Speechiness"
+    },
+    "acousticness": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Acousticness"
+    },
+    "instrumentalness": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Instrumentalness"
+    },
+    "liveness": {
+      "anyOf": [
+        {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Liveness"
+    },
+    "mode": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mode"
+    },
+    "duration_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Duration Ms"
+    }
+  },
+  "required": [
+    "track_id",
+    "primary_artist_id",
+    "album_id",
+    "danceability",
+    "energy",
+    "tempo"
+  ],
+  "title": "GoldFactAudioFeatures",
+  "type": "object"
+}
