@@ -44,9 +44,9 @@ class SpotifyIngestionClient:
     BACKOFF_BASE: float = _spotify_cfg.get("backoff_base_seconds", 1.0)
     MARKET: str = _spotify_cfg.get("market", "US")
     TOP_TIME_RANGES: tuple[str, ...] = _spotify_cfg.get("top_time_ranges", ("short_term", "medium_term"))
-    TOP_LIMIT: int = _spotify_cfg.get("top_limit", 100)
-    FOLLOWED_LIMIT: int = _spotify_cfg.get("followed_artists_limit", 100)
-    DERIVED_GENRES_MAX: int = _spotify_cfg.get("derived_genres_max", 20)
+    TOP_LIMIT: int = _spotify_cfg.get("top_limit", 50)
+    FOLLOWED_LIMIT: int = _spotify_cfg.get("followed_artists_limit", 50)
+    DERIVED_GENRES_MAX: int = _spotify_cfg.get("derived_genres_max", 10)
 
     def __init__(self, bronze_dir: Path = BRONZE_DIR) -> None:
         self.sp = get_authenticated_client()
