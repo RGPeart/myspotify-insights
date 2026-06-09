@@ -4,7 +4,11 @@ These mirror the columns emitted by the dbt models in dbt/models/gold/. Required
 fields and ranges track the dbt schema tests (not_null, accepted_range) so the
 Python contract and the dbt tests agree on what "valid gold data" means.
 
-JSON Schema files under /schemas/gold/ are generated from these models.
+NOTE: these models are NOT wired into runtime validation. Gold is produced and
+validated by dbt (dbt/models/gold/schema.yml), so re-validating it in Python would
+duplicate that boundary. They exist for JSON Schema generation, documentation, and
+reuse by downstream consumers. JSON Schema files under /schemas/gold/ are generated
+from these models.
 """
 from __future__ import annotations
 

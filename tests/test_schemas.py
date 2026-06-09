@@ -134,6 +134,14 @@ class TestValidateDataframe:
         with pytest.raises(SchemaValidationError):
             validate_dataframe(df, SilverTrack, "silver/tracks")
 
+    # extra="forbid" must trip through validate_dataframe, not just direct construction:
+    # an unexpected column in the DataFrame is a breaking schema change.
+    def test_extra_column_raises(self):
+        df = _valid_tracks_df()
+        df["surprise"] = "boom"
+        with pytest.raises(SchemaValidationError):
+            validate_dataframe(df, SilverTrack, "silver/tracks")
+
     def test_error_reports_invalid_row_count(self):
         df = _valid_audio_features_df()
         df.loc[0, "danceability"] = 5.0

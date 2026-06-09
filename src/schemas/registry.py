@@ -51,8 +51,14 @@ SCHEMA_REGISTRY: dict[str, SchemaSpec] = {spec.key: spec for spec in SCHEMA_SPEC
 
 
 def build_json_schema(spec: SchemaSpec) -> dict:
-    """Render a spec's Pydantic model to a versioned JSON Schema document."""
+    """Render a spec's Pydantic model to a versioned JSON Schema document.
+
+    Drop any `$schema`/`version` keys Pydantic might emit at the root so our
+    metadata always wins and stays first, regardless of the Pydantic version.
+    """
     schema = spec.model.model_json_schema()
+    schema.pop("$schema", None)
+    schema.pop("version", None)
     return {
         "$schema": _JSON_SCHEMA_DIALECT,
         "version": spec.version,
