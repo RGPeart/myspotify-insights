@@ -653,7 +653,7 @@ If you want to use Claude Code with Google Gemini via LiteLLM:
 
 1.  **Install LiteLLM:**
     ```bash
-    pip install litellm
+    pip install litellm[proxy]
     ```
 
 2.  **Configure LiteLLM for Gemini:**
@@ -661,9 +661,9 @@ If you want to use Claude Code with Google Gemini via LiteLLM:
     ```yaml
     # litellm_config.yml
     model_list:
-      - model_name: gemini-2.5-flash
+      - model_name: gemini-3.1-flash-lite
         litellm_params:
-          model: gemini/gemini-2.5-flash
+          model: gemini/gemini-3.1-flash-lite
           api_key: os.environ/GEMINI_API_KEY
     ```
 
