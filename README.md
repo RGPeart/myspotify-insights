@@ -373,8 +373,8 @@ pytest tests/test_etl.py::TestBronzeToSilverRun::test_run_end_to_end
 | Feature 3: Recommendation model | Done | `main` |
 | Feature 4: FastAPI service | Done | `main` |
 | Feature 5: Streamlit dashboard | Done | `main` |
-| Feature 6: Observability & Data Lineage | In Progress | `main` |
-| Feature 7: SQL Transformation Layer (dbt + DuckDB) | In Progress | `feature/dbt-duckdb` |
+| Feature 6: Observability & Data Lineage | Done | `main` |
+| Feature 7: SQL Transformation Layer (dbt + DuckDB) | Done | `main` |
 | Feature 8: Schema Registry & Schema Evolution | Planned | — |
 | Feature 9: Data Contracts | Planned | — |
 | Feature 10: Idempotent DAGs & Backfill | Planned | — |
