@@ -4,6 +4,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from src.schemas.silver import SilverArtist, SilverAudioFeatures, SilverTrack
+from src.schemas.validate import validate_dataframe
 from src.utils.config import load_config
 from src.utils.data_quality import DataQualityReport, assert_quality, run_quality_checks
 from src.utils.logging_config import get_logger
@@ -195,6 +197,7 @@ def run(bronze_dir: Path | None = None, silver_dir: Path | None = None) -> dict[
         )
         reports["tracks"] = report
         assert_quality(report)
+        validate_dataframe(df, SilverTrack, "silver/tracks")
         write_parquet(df, "tracks", silver_dir)
 
     # --- Audio features ---
@@ -208,6 +211,7 @@ def run(bronze_dir: Path | None = None, silver_dir: Path | None = None) -> dict[
         )
         reports["audio_features"] = report
         assert_quality(report)
+        validate_dataframe(df, SilverAudioFeatures, "silver/audio_features")
         write_parquet(df, "audio_features", silver_dir)
 
     # --- Artists ---
@@ -221,6 +225,7 @@ def run(bronze_dir: Path | None = None, silver_dir: Path | None = None) -> dict[
         )
         reports["artists"] = report
         assert_quality(report)
+        validate_dataframe(df, SilverArtist, "silver/artists")
         write_parquet(df, "artists", silver_dir)
 
     return reports

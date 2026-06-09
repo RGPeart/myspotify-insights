@@ -66,6 +66,7 @@ src/etl/silver_to_gold.py          → data/gold/     (aggregated, feature-engin
 - `src/utils/logging_config.py` — shared structured logger used across all modules
 - `src/utils/config.py` — `load_config()` reads `config/config.yaml` with UTF-8 encoding; called lazily inside `run()` functions (not at import time)
 - `src/utils/parquet_io.py` — `write_parquet()` used by both ETL modules
+- `src/schemas/` — Pydantic contracts (canonical source of truth) for the silver + gold datasets; `validate_dataframe()` enforces them at the silver boundary. JSON Schema under `schemas/` is generated via `python scripts/generate_schemas.py` and guarded against drift by `tests/test_schemas.py`. Bump the model `version` in `src/schemas/registry.py` and update `schemas/CHANGELOG.md` on any change.
 - `config/config.yaml` holds non-secret configuration; secrets go in `.env` (never `config/secrets.yaml`)
 - Azure Blob Storage mirrors the `data/` directory structure in the cloud
 
@@ -77,6 +78,7 @@ src/etl/silver_to_gold.py          → data/gold/     (aggregated, feature-engin
 - Logs a warning when feature values fall outside the defined normalization bounds before clipping
 - Categorizes genres via ordered substring matching in `_GENRE_PATTERNS` (most-specific first; "pop" is intentionally the catch-all tail)
 - Quality gate: `assert_quality(report)` raises `DataQualityError` before writing Parquet if checks fail
+- Schema contract: `validate_dataframe(df, <SilverModel>, ...)` runs after the quality gate and before writing Parquet; raises `SchemaValidationError` on any row that violates the Pydantic contract in `src/schemas/silver.py`
 
 ### Silver → Gold (dbt project at `dbt/`)
 - Implemented in dbt + DuckDB; replaces the legacy `src/etl/silver_to_gold.py` (kept in-tree for reference but no longer invoked by the DAG).

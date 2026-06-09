@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "artist_id": {
+      "title": "Artist Id",
+      "type": "string"
+    },
+    "artist_name": {
+      "title": "Artist Name",
+      "type": "string"
+    },
+    "popularity": {
+      "anyOf": [
+        {
+          "maximum": 100,
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Popularity"
+    },
+    "followers": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Followers"
+    },
+    "genres": {
+      "default": "",
+      "title": "Genres",
+      "type": "string"
+    },
+    "primary_genre": {
+      "title": "Primary Genre",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artist_id",
+    "artist_name",
+    "primary_genre"
+  ],
+  "title": "GoldDimArtist",
+  "type": "object"
+}
