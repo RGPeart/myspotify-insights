@@ -75,9 +75,30 @@ pip install -e .
 
 # Configure credentials
 cp .env.example .env
-# Edit .env — at minimum set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, FERNET_KEY,
+# Edit .env — at minimum set SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET,
+# SPOTIFY_REFRESH_TOKEN (see "One-time Spotify authorization" below), FERNET_KEY,
 # and AIRFLOW__API_AUTH__JWT_SECRET (see generation commands inside .env.example)
 ```
+
+### One-time Spotify authorization
+
+Ingestion uses the Spotify **Authorization Code** flow to read *your* listening
+data (`/me`, `/me/top/{tracks,artists}`, `/me/following`), so it needs a user
+refresh token in addition to the client ID/secret. Obtain one once:
+
+```bash
+python -m src.ingestion.spotify_auth_login
+```
+
+This opens a browser, asks you to grant the `user-top-read`, `user-follow-read`,
+and `user-read-private` scopes, then prints a line like
+`SPOTIFY_REFRESH_TOKEN=...`. Paste that value into your `.env`. The token is
+long-lived; every ingest run (including headless Airflow runs) exchanges it for a
+short-lived access token automatically — no further browser interaction needed.
+
+> The redirect URI registered in your Spotify app **must exactly match**
+> `SPOTIFY_REDIRECT_URI` in `.env` (default `http://127.0.0.1:8888/callback`).
+> Spotify requires `127.0.0.1` for loopback redirects, not `localhost`.
 
 ### Running the pipeline (via Airflow)
 
@@ -100,6 +121,68 @@ uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8001
 streamlit run src/dashboard/app.py
 #    Open http://localhost:8501
 ```
+
+### Running the pipeline without Docker (direct modules)
+
+If Docker is unavailable, you can run every stage the DAG orchestrates as a
+plain module from the **repo root** (venv active). This is the exact sequence the
+DAG performs, minus Airflow:
+
+```bash
+# 1. Ingestion → data/bronze/  (requires SPOTIFY_REFRESH_TOKEN; see above)
+python -m src.ingestion.spotify_client
+
+# 2. Bronze → Silver → data/silver/*.parquet
+python -m src.etl.bronze_to_silver
+
+# 3. Silver → Gold (dbt + DuckDB) → data/gold/*.parquet
+#    Run from the repo root so DuckDB's relative paths resolve against ./data
+dbt deps --project-dir dbt --profiles-dir dbt
+dbt run  --project-dir dbt --profiles-dir dbt
+dbt test --project-dir dbt --profiles-dir dbt
+
+# 4. Train the recommendation model → models/recommendation_model.pkl
+python -m src.models.train
+
+# 5. Serve the API (separate terminal)
+uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8001
+
+# 6. Serve the dashboard (separate terminal)
+streamlit run src/dashboard/app.py
+```
+
+Running dbt with `--project-dir dbt` from the repo root keeps the working
+directory at the project root, so the default `silver_dir`/`gold_dir` vars
+(`data/silver`, `data/gold`) and the DuckDB path resolve correctly without
+passing absolute paths. A healthy run reports `PASS=6` for `dbt run` and
+`PASS=37` for `dbt test`.
+
+### What ingestion produces
+
+`python -m src.ingestion.spotify_client` reads your refresh token, then:
+
+- fetches your profile, your top tracks and top artists (`short_term` +
+  `medium_term`), and your followed artists;
+- derives the most common genres across your top + followed artists and uses
+  those to drive a catalog-expansion search (falling back to
+  `spotify.fallback_genres` from `config/config.yaml` only if no personal genres
+  are available);
+- merges your top tracks/artists into the standard `tracks`/`artists` layers so
+  they reach silver/gold;
+- writes raw JSON to `data/bronze/`, including the personal-data partitions:
+
+  ```text
+  data/bronze/
+  ├── tracks/ , audio_features/ , artists/          (standard catalog)
+  ├── user_profile/<date>/
+  ├── user_top_tracks/{short_term,medium_term}/<date>/
+  ├── user_top_artists/{short_term,medium_term}/<date>/
+  └── followed_artists/<date>/
+  ```
+
+  The `user_*` and `followed_artists` partitions are landed for future
+  personalised-ML work; the standard `tracks`/`audio_features`/`artists`
+  partitions feed the existing silver → gold pipeline unchanged.
 
 ## SQL Transformation Layer (dbt + DuckDB)
 
@@ -154,7 +237,7 @@ dbt run  --profiles-dir . --vars $vars
 dbt test --profiles-dir . --vars $vars
 ```
 
-Expected output: `PASS=6 WARN=0 ERROR=0` (3 staging views + 3 gold external models) and `PASS=35` data tests.
+Expected output: `PASS=6 WARN=0 ERROR=0` (3 staging views + 3 gold external models) and `PASS=37` data tests.
 
 ### Query the DuckDB database
 
