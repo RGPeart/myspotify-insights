@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "version": "1.0.0",
+  "additionalProperties": false,
+  "properties": {
+    "artist_id": {
+      "title": "Artist Id",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "popularity": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Popularity",
+      "type": "integer"
+    },
+    "followers": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Followers"
+    },
+    "genres": {
+      "default": "",
+      "title": "Genres",
+      "type": "string"
+    },
+    "primary_genre": {
+      "title": "Primary Genre",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artist_id",
+    "name",
+    "popularity",
+    "primary_genre"
+  ],
+  "title": "SilverArtist",
+  "type": "object"
+}

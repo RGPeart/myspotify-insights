@@ -350,6 +350,45 @@ The **Streamlit dashboard** includes a static pipeline topology diagram and a li
 
 These are pre-configured in `.env.example` and `docker-compose.yaml`. No additional setup is needed beyond starting the lineage profile.
 
+## Schema Registry & Schema Evolution
+
+Each pipeline dataset has an explicit, versioned schema contract. **Pydantic models
+in [`src/schemas/`](src/schemas/) are the canonical source of truth**; the JSON
+Schema files in [`schemas/`](schemas/) are generated artifacts kept in sync via CI.
+
+**What's covered:** the silver datasets (`tracks`, `audio_features`, `artists`) and
+the gold datasets (`dim_tracks`, `dim_artists`, `fact_audio_features`). Bronze is
+excluded — it stores raw nested Spotify API JSON whose shape Spotify controls.
+
+```
+src/schemas/
+├── silver.py        # SilverTrack, SilverAudioFeatures, SilverArtist
+├── gold.py          # GoldDimTrack, GoldDimArtist, GoldFactAudioFeatures
+├── registry.py      # SCHEMA_REGISTRY + build_json_schema()
+└── validate.py      # validate_dataframe() + SchemaValidationError
+
+schemas/             # generated JSON Schema (do not edit by hand)
+├── silver/*.json
+├── gold/*.json
+└── CHANGELOG.md     # human-readable log of every schema change
+```
+
+**Runtime enforcement:** `src/etl/bronze_to_silver.py` calls `validate_dataframe()`
+on each silver dataset after the quality gate and before writing Parquet. A contract
+violation raises `SchemaValidationError` and halts the pipeline with a structured
+`schema_validation_failed` log event naming the offending rows.
+
+**Evolution workflow** — whenever you change a model:
+
+1. Edit the Pydantic model in `src/schemas/` and bump its `version` in `registry.py`.
+2. Regenerate the JSON Schema files: `python scripts/generate_schemas.py`.
+3. Add an entry to [`schemas/CHANGELOG.md`](schemas/CHANGELOG.md).
+4. Commit all of the above together.
+
+CI guards this: `tests/test_schemas.py` regenerates each schema from its model and
+fails if it differs from the committed file, so the JSON Schema can never silently
+drift from the Pydantic source of truth.
+
 ## Testing
 
 ```bash
@@ -375,7 +414,7 @@ pytest tests/test_etl.py::TestBronzeToSilverRun::test_run_end_to_end
 | Feature 5: Streamlit dashboard | Done | `main` |
 | Feature 6: Observability & Data Lineage | Done | `main` |
 | Feature 7: SQL Transformation Layer (dbt + DuckDB) | Done | `main` |
-| Feature 8: Schema Registry & Schema Evolution | Planned | — |
+| Feature 8: Schema Registry & Schema Evolution | Done | `feature/schema-registry` |
 | Feature 9: Data Contracts | Planned | — |
 | Feature 10: Idempotent DAGs & Backfill | Planned | — |
 | Feature 11: SLA Monitoring & Alerting | Planned | — |
