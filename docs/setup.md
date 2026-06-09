@@ -104,9 +104,13 @@ The ingestion pipeline connects to the Spotify Web API using OAuth. You need to 
 
 3. Fill in any name and description (e.g. "MySpotify Insights"). Set the **Redirect URI** to:
    ```
-   http://localhost:8888/callback
+   http://127.0.0.1:8888/callback
    ```
    Accept the terms and click **Save**.
+
+   > Use `127.0.0.1`, **not** `localhost` — Spotify now rejects `localhost` for
+   > loopback redirects. This value must exactly match `SPOTIFY_REDIRECT_URI` in
+   > your `.env` (next step).
 
 4. On your new app's page, click **Settings**. You will see your **Client ID** and **Client Secret** — keep this page open for the next step.
 
@@ -132,7 +136,11 @@ Open `.env` in any text editor and fill in your values:
 # Spotify API Credentials (from step 5)
 SPOTIFY_CLIENT_ID=paste_your_client_id_here
 SPOTIFY_CLIENT_SECRET=paste_your_client_secret_here
-SPOTIFY_REDIRECT_URI=http://localhost:8888/callback
+SPOTIFY_REDIRECT_URI=http://127.0.0.1:8888/callback
+
+# User refresh token — leave blank for now; you'll fill this in during step 7
+# by running the one-time login script (python -m src.ingestion.spotify_auth_login)
+SPOTIFY_REFRESH_TOKEN=
 
 # Azure Storage — leave as-is if running locally only
 AZURE_STORAGE_CONNECTION_STRING=your_connection_string_here
@@ -149,9 +157,39 @@ Save the file. You do **not** need to fill in the Azure variables to run Feature
 
 ## 7. Feature 1 — Data Ingestion
 
-**What it does:** Connects to the Spotify Web API, fetches tracks, artists, and audio features, and saves them as raw JSON files under `data/bronze/`.
+**What it does:** Authenticates as *you* against the Spotify Web API, fetches your
+profile, top tracks, top artists, and followed artists, expands a catalog around
+your taste, and saves everything as raw JSON files under `data/bronze/`.
 
-### Run it
+### Step 7a — Get a user refresh token (one-time)
+
+Ingestion uses the Spotify **Authorization Code** flow to read your personal
+listening data (`/me`, `/me/top/{tracks,artists}`, `/me/following`). That requires
+a user refresh token. Generate one once with the login helper:
+
+```bash
+python -m src.ingestion.spotify_auth_login
+```
+
+Your browser opens and asks you to grant three scopes — `user-top-read`,
+`user-follow-read`, `user-read-private`. After you confirm, the page redirects to
+`127.0.0.1:8888/callback` (it may look like a blank/failed page — that's fine; the
+code was captured). The script then prints a line like:
+
+```
+SPOTIFY_REFRESH_TOKEN=AQD...very-long-token...xyz
+```
+
+Copy that whole line into your `.env`, replacing the empty `SPOTIFY_REFRESH_TOKEN=`
+from step 6. You only do this once — the token is long-lived and every ingest run
+(including headless Airflow runs) exchanges it for a fresh access token
+automatically.
+
+> If your environment can't open a browser, Spotipy prints the authorization URL
+> to the terminal — open it manually, approve, then paste the full redirect URL
+> back when prompted.
+
+### Step 7b — Run ingestion
 
 ```bash
 python -m src.ingestion.spotify_client
@@ -159,33 +197,57 @@ python -m src.ingestion.spotify_client
 
 ### What happens
 
-The first time you run this, your browser will open and ask you to log in to Spotify and authorise the app. After you confirm, the page will redirect to `localhost:8888/callback` — the page will appear to fail (that is expected), but the token has been captured.
+With the refresh token in place, the script runs headlessly (no browser) and:
 
-The script will then:
-- Fetch tracks across several genre categories
-- Fetch audio features for each track
-- Fetch artist metadata
-- Write raw JSON files to:
+- fetches your **profile**, your **top tracks** and **top artists** for both the
+  `short_term` (~4 weeks) and `medium_term` (~6 months) windows, and your
+  **followed artists**;
+- **derives the most common genres** across your top + followed artists and uses
+  them to drive a catalog-expansion search (if you have no personal genres yet, it
+  falls back to `spotify.fallback_genres` in `config/config.yaml`);
+- fetches audio features (via ReccoBeats) and artist metadata for the catalog;
+- **merges your top tracks/artists into the standard `tracks`/`artists` layers**
+  so they flow through silver → gold even if the search didn't surface them;
+- writes raw JSON to `data/bronze/`:
   ```
   data/
   └── bronze/
       ├── tracks/YYYY-MM-DD/tracks_YYYYMMDDTHHMMSSZ.json
       ├── audio_features/YYYY-MM-DD/audio_features_...json
-      └── artists/YYYY-MM-DD/artists_...json
+      ├── artists/YYYY-MM-DD/artists_...json
+      ├── user_profile/YYYY-MM-DD/user_profile_...json
+      ├── user_top_tracks/{short_term,medium_term}/YYYY-MM-DD/...json
+      ├── user_top_artists/{short_term,medium_term}/YYYY-MM-DD/...json
+      └── followed_artists/YYYY-MM-DD/followed_artists_...json
   ```
-- Write a manifest file to `data/bronze/manifest.json` that records which data has already been ingested (so re-running skips already-fetched batches)
+- writes a manifest file to `data/bronze/manifest.json` that records which track
+  and artist IDs have already been ingested (so re-running skips already-fetched
+  records).
+
+The `user_*` and `followed_artists` partitions are landed for future personalised
+ML work; the standard `tracks`/`audio_features`/`artists` partitions feed the
+existing Bronze → Silver → Gold pipeline unchanged.
+
+A successful run ends with a summary line, e.g.:
+
+```
+Ingestion summary: {'tracks': 440, 'audio_features': 306, 'artists': 298}
+```
 
 ### Verify it worked
 
 ```bash
 # Windows
 dir data\bronze\tracks
+dir data\bronze\user_top_tracks\short_term
 
 # macOS / Linux
 ls data/bronze/tracks/
+ls data/bronze/user_top_tracks/short_term/
 ```
 
-You should see a dated folder containing a JSON file. Open it to confirm it contains track objects.
+You should see dated folders containing JSON files. Open one to confirm it
+contains track/artist objects.
 
 ---
 
@@ -385,7 +447,7 @@ curl "http://localhost:5002/api/v1/namespaces/myspotify-insights/jobs" | python 
 
 ## 13. Feature 7 — SQL Transformation Layer (dbt + DuckDB)
 
-**What it does:** Replaces the Silver → Gold pandas transform with a dbt project backed by DuckDB. Gold tables (`dim_tracks`, `dim_artists`, `fact_audio_features`) are now defined in SQL, version-controlled, and validated by 35 generic tests (`unique`, `not_null`, `dbt_utils.accepted_range`). Outputs land in `data/gold/*.parquet` exactly where the API and dashboard read from, so nothing downstream needs to change.
+**What it does:** Replaces the Silver → Gold pandas transform with a dbt project backed by DuckDB. Gold tables (`dim_tracks`, `dim_artists`, `fact_audio_features`) are now defined in SQL, version-controlled, and validated by 37 generic tests (`unique`, `not_null`, `dbt_utils.accepted_range`). Outputs land in `data/gold/*.parquet` exactly where the API and dashboard read from, so nothing downstream needs to change.
 
 You must complete Feature 1 (ingestion) and Feature 2's Bronze → Silver stage first so there is data in `data/silver/` for dbt to read.
 
@@ -432,7 +494,7 @@ Why pass absolute paths? DuckDB's `read_parquet()` resolves relative paths again
 
 ```
 Done. PASS=6 WARN=0 ERROR=0 SKIP=0 NO-OP=0 TOTAL=6     ← dbt run
-Done. PASS=35 WARN=0 ERROR=0 SKIP=0 NO-OP=0 TOTAL=35   ← dbt test
+Done. PASS=37 WARN=0 ERROR=0 SKIP=0 NO-OP=0 TOTAL=37   ← dbt test
 ```
 
 After `dbt run` you will have:
@@ -600,12 +662,12 @@ Common causes:
 
 ### `FileNotFoundError` when reading silver/gold data
 
-Bronze → Silver must run before Silver → Gold, and ingestion must run before Bronze → Silver. Run the stages in order:
+Bronze → Silver must run before Silver → Gold, and ingestion must run before Bronze → Silver. Run the stages in order (Silver → Gold is now dbt, not a Python module):
 
 ```bash
 python -m src.ingestion.spotify_client
 python -m src.etl.bronze_to_silver
-python -m src.etl.silver_to_gold
+dbt run --project-dir dbt --profiles-dir dbt   # from the repo root
 ```
 
 ### Tests fail with import errors

@@ -5,21 +5,28 @@ import requests # Added import
 from unittest.mock import MagicMock, patch
 
 import src.ingestion.spotify_client as spotify_module
-from src.ingestion.spotify_client import SpotifyIngestionClient, _batched, _default_genres
+from src.ingestion.spotify_client import SpotifyIngestionClient, _batched, _fallback_genres
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("SPOTIFY_CLIENT_ID", "test_id")
     monkeypatch.setenv("SPOTIFY_CLIENT_SECRET", "test_secret")
+    monkeypatch.setenv("SPOTIFY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
+    monkeypatch.setenv("SPOTIFY_REFRESH_TOKEN", "test_refresh_token")
     monkeypatch.setattr(spotify_module, "BRONZE_DIR", tmp_path / "bronze")
     monkeypatch.setattr(spotify_module, "MANIFEST_PATH", tmp_path / "bronze" / "manifest.json")
 
-    with patch("src.ingestion.spotify_client.SpotifyClientCredentials"), \
-         patch("src.ingestion.spotify_client.spotipy.Spotify") as mock_sp_cls, \
-         patch("src.ingestion.spotify_client.AzureBlobUploader"): # Mock AzureBlobUploader
-        mock_sp = MagicMock()
-        mock_sp_cls.return_value = mock_sp
+    mock_sp = MagicMock()
+    # Sensible defaults so tests that only care about the search flow don't have
+    # to mock every personal-data endpoint.
+    mock_sp.current_user.return_value = None
+    mock_sp.current_user_top_tracks.return_value = {"items": []}
+    mock_sp.current_user_top_artists.return_value = {"items": []}
+    mock_sp.current_user_followed_artists.return_value = {"artists": {"items": []}}
+
+    with patch("src.ingestion.spotify_client.get_authenticated_client", return_value=mock_sp), \
+         patch("src.ingestion.spotify_client.AzureBlobUploader"):
         c = SpotifyIngestionClient(bronze_dir=tmp_path / "bronze")
         yield c, mock_sp, tmp_path
 
@@ -544,3 +551,315 @@ class TestAzureUpload:
         expected_base = m.BRONZE_DIR.parent
         for call in mock_azure.upload_file.call_args_list:
             assert call.kwargs["relative_to"] == expected_base
+
+
+# ------------------------------------------------------------------ #
+# Helpers for personal-data tests                                      #
+# ------------------------------------------------------------------ #
+
+def make_user_profile(user_id: str = "u1") -> dict:
+    return {
+        "id": user_id,
+        "display_name": "Test User",
+        "country": "US",
+        "product": "premium",
+        "followers": {"total": 42},
+    }
+
+
+def make_artist(artist_id: str, genres: list[str] | None = None, popularity: int = 60) -> dict:
+    return {
+        "id": artist_id,
+        "name": f"Artist {artist_id}",
+        "popularity": popularity,
+        "followers": {"total": 1000},
+        "genres": genres or [],
+    }
+
+
+def make_top_tracks_response(track_ids: list[str], artist_id: str = "artist1") -> dict:
+    return {"items": [make_track(tid, artist_id) for tid in track_ids]}
+
+
+def make_top_artists_response(artist_specs: list[tuple[str, list[str]]]) -> dict:
+    return {"items": [make_artist(aid, genres) for aid, genres in artist_specs]}
+
+
+def make_followed_artists_response(artist_specs: list[tuple[str, list[str]]]) -> dict:
+    return {"artists": {"items": [make_artist(aid, genres) for aid, genres in artist_specs]}}
+
+
+# ------------------------------------------------------------------ #
+# Personal data fetches                                                #
+# ------------------------------------------------------------------ #
+
+class TestPersonalDataFetches:
+    # The user profile is a single object, not a list; fetcher must return it as-is
+    # so the caller can wrap it in a one-element list for bronze storage.
+    def test_fetch_user_profile_returns_dict(self, client):
+        c, mock_sp, _ = client
+        mock_sp.current_user.return_value = make_user_profile()
+        assert c._fetch_user_profile() == make_user_profile()
+
+    # If Spotify returns an auth/permission error for /me, the fetcher must log and
+    # return None so the rest of the ingest still runs.
+    def test_fetch_user_profile_returns_none_on_error(self, client):
+        c, mock_sp, _ = client
+        mock_sp.current_user.side_effect = spotipy.SpotifyException(403, -1, "forbidden")
+        assert c._fetch_user_profile() is None
+
+    # Top items must be unwrapped from the {"items": [...]} envelope and time_range
+    # passed through verbatim so we get the requested window.
+    def test_fetch_top_tracks_passes_time_range(self, client):
+        c, mock_sp, _ = client
+        mock_sp.current_user_top_tracks.return_value = make_top_tracks_response(["t1", "t2"])
+        items = c._fetch_user_top_items("tracks", "short_term", 50)
+        assert [i["id"] for i in items] == ["t1", "t2"]
+        mock_sp.current_user_top_tracks.assert_called_with(limit=50, time_range="short_term")
+
+    def test_fetch_top_artists_unwraps_envelope(self, client):
+        c, mock_sp, _ = client
+        mock_sp.current_user_top_artists.return_value = make_top_artists_response(
+            [("a1", ["pop"]), ("a2", ["rock"])]
+        )
+        items = c._fetch_user_top_items("artists", "medium_term", 50)
+        assert {i["id"] for i in items} == {"a1", "a2"}
+
+    # An unknown item_type is a programming error and must surface immediately, not be
+    # silently swallowed into a misleading "no items" result.
+    def test_fetch_top_items_rejects_unknown_type(self, client):
+        c, _, _ = client
+        with pytest.raises(ValueError):
+            c._fetch_user_top_items("playlists", "short_term", 50)
+
+    # Followed artists are nested one level deeper ({"artists": {"items": [...]}});
+    # the fetcher must descend through both wrappers.
+    def test_fetch_followed_artists_unwraps_nested_envelope(self, client):
+        c, mock_sp, _ = client
+        mock_sp.current_user_followed_artists.return_value = make_followed_artists_response(
+            [("a3", ["indie pop"])]
+        )
+        items = c._fetch_followed_artists(50)
+        assert items == [make_artist("a3", ["indie pop"])]
+
+
+# ------------------------------------------------------------------ #
+# Genre derivation                                                     #
+# ------------------------------------------------------------------ #
+
+class TestDeriveSearchGenres:
+    # The most-common genre across the supplied artists must rank first; this is the
+    # core ordering that drives which genres seed the catalog search.
+    def test_ranks_by_frequency(self, client):
+        c, _, _ = client
+        artists = [
+            make_artist("a1", ["pop", "indie pop"]),
+            make_artist("a2", ["pop", "rock"]),
+            make_artist("a3", ["pop"]),
+        ]
+        result = c._derive_search_genres(artists)
+        assert result[0] == "pop"
+        assert set(result) == {"pop", "indie pop", "rock"}
+
+    # The cap from config must be respected so the downstream search isn't
+    # ballooned by a huge taste profile.
+    def test_caps_at_derived_genres_max(self, client):
+        c, _, _ = client
+        c.DERIVED_GENRES_MAX = 2
+        artists = [make_artist(f"a{i}", [f"g{i}"]) for i in range(5)]
+        result = c._derive_search_genres(artists)
+        assert len(result) == 2
+
+    # No artists / no genres → empty list (caller decides whether to apply the fallback).
+    def test_empty_input_returns_empty(self, client):
+        c, _, _ = client
+        assert c._derive_search_genres([]) == []
+        assert c._derive_search_genres([make_artist("a1", [])]) == []
+
+
+# ------------------------------------------------------------------ #
+# Ingest with personal data flow                                       #
+# ------------------------------------------------------------------ #
+
+class TestIngestPersonalDataFlow:
+    def _wire_personal(self, mock_sp, top_tracks=None, top_artists=None, followed=None, profile=None):
+        mock_sp.current_user.return_value = profile
+        mock_sp.current_user_top_tracks.return_value = {"items": top_tracks or []}
+        mock_sp.current_user_top_artists.return_value = {"items": top_artists or []}
+        mock_sp.current_user_followed_artists.return_value = {"artists": {"items": followed or []}}
+
+    # When the user has top artists with genres, those genres (not the fallback) must
+    # drive the search; this is the whole point of switching to personal-data ingestion.
+    def test_uses_derived_genres_when_top_artists_present(self, client):
+        c, mock_sp, _ = client
+        self._wire_personal(
+            mock_sp,
+            top_artists=[make_artist("a1", ["synthwave"]), make_artist("a2", ["synthwave"])],
+        )
+        mock_sp.search.return_value = {"tracks": {"items": [make_track("t1", "a1")]}}
+        mock_sp.artists.return_value = {"artists": [make_artist("a1", ["synthwave"])]}
+        c._fetch_audio_features = lambda ids: [make_audio_feature(tid) for tid in ids]
+
+        c.ingest(tracks_per_genre=1)
+
+        # The search query must reference the derived genre, not a fallback genre.
+        search_calls = mock_sp.search.call_args_list
+        assert any("synthwave" in call.kwargs.get("q", "") for call in search_calls)
+        assert not any("pop" in call.kwargs.get("q", "") and "synthwave" not in call.kwargs.get("q", "")
+                       for call in search_calls)
+
+    # When no personal data is available (new account / 403), the fallback list from
+    # config must be used so catalog expansion still happens.
+    def test_falls_back_to_fallback_genres_when_no_personal_data(self, client):
+        c, mock_sp, _ = client
+        # All personal endpoints return empty (the fixture's defaults already do this)
+        mock_sp.search.return_value = {"tracks": {"items": []}}
+        c._fetch_audio_features = lambda ids: []
+
+        c.ingest(tracks_per_genre=1)
+
+        searched_genres = [call.kwargs["q"] for call in mock_sp.search.call_args_list]
+        assert any("pop" in q for q in searched_genres)
+
+    # User profile, top tracks per time range, top artists per time range, and followed
+    # artists must each land under their own bronze sub-directory so provenance is preserved.
+    def test_writes_personal_bronze_artifacts(self, client, tmp_path):
+        c, mock_sp, _ = client
+        self._wire_personal(
+            mock_sp,
+            profile=make_user_profile(),
+            top_tracks=[make_track("t1")],
+            top_artists=[make_artist("a1", ["pop"])],
+            followed=[make_artist("a2", ["rock"])],
+        )
+        mock_sp.search.return_value = {"tracks": {"items": []}}
+        mock_sp.artists.return_value = {"artists": []}
+        c._fetch_audio_features = lambda ids: [make_audio_feature(tid) for tid in ids]
+
+        c.ingest(tracks_per_genre=0)
+
+        bronze = tmp_path / "bronze"
+        assert any(bronze.glob("user_profile/**/*.json"))
+        # Top items must be partitioned by time_range
+        assert any(bronze.glob("user_top_tracks/short_term/**/*.json"))
+        assert any(bronze.glob("user_top_tracks/medium_term/**/*.json"))
+        assert any(bronze.glob("user_top_artists/short_term/**/*.json"))
+        assert any(bronze.glob("user_top_artists/medium_term/**/*.json"))
+        assert any(bronze.glob("followed_artists/**/*.json"))
+
+    # Top tracks must also flow into the standard `tracks` data type (and into the
+    # tracks manifest) so they reach silver/gold even if the genre search misses them.
+    def test_top_tracks_merge_into_standard_tracks(self, client, tmp_path):
+        c, mock_sp, _ = client
+        self._wire_personal(
+            mock_sp,
+            top_tracks=[make_track("top_only_track", "a1")],
+        )
+        mock_sp.search.return_value = {"tracks": {"items": []}}  # no search hits
+        mock_sp.artists.return_value = {"artists": [make_artist("a1", ["pop"])]}
+        c._fetch_audio_features = lambda ids: [make_audio_feature(tid) for tid in ids]
+
+        summary = c.ingest(tracks_per_genre=0)
+
+        assert summary["tracks"] == 1
+        # And the standard tracks/ bronze dir was written
+        assert any((tmp_path / "bronze").glob("tracks/**/*.json"))
+        # Manifest records the merged ID
+        manifest = json.loads((tmp_path / "bronze" / "manifest.json").read_text())
+        assert "top_only_track" in manifest["tracks"]["ids"]
+
+    # For artists that were already fetched as top/followed (full payload available),
+    # the client must NOT issue a redundant /artists call.
+    def test_avoids_refetching_artists_already_in_top_or_followed(self, client):
+        c, mock_sp, _ = client
+        self._wire_personal(
+            mock_sp,
+            top_tracks=[make_track("t1", "a1")],
+            top_artists=[make_artist("a1", ["pop"])],  # already have full a1 payload
+        )
+        mock_sp.search.return_value = {"tracks": {"items": []}}
+        mock_sp.artists.return_value = {"artists": []}
+        c._fetch_audio_features = lambda ids: []
+
+        c.ingest(tracks_per_genre=0)
+
+        # a1 came from top_artists; no need to call /artists for it.
+        mock_sp.artists.assert_not_called()
+
+
+# ------------------------------------------------------------------ #
+# Artist merge across time-ranges / followed                           #
+# ------------------------------------------------------------------ #
+
+class TestArtistMerge:
+    # If the same artist appears in short_term, medium_term, and followed lists with
+    # different genres, all genres must be unioned so genre derivation sees the full
+    # picture instead of whatever the first list happened to include.
+    def test_merges_genres_across_time_ranges_and_followed(self, client, tmp_path):
+        c, mock_sp, _ = client
+        mock_sp.current_user.return_value = None
+        # short_term has the artist with one genre, medium_term with another,
+        # followed adds a third. All must contribute to the derived genre seeds.
+        mock_sp.current_user_top_artists.side_effect = [
+            {"items": [make_artist("a1", ["synthwave"])]},
+            {"items": [make_artist("a1", ["indie pop"])]},
+        ]
+        mock_sp.current_user_top_tracks.return_value = {"items": []}
+        mock_sp.current_user_followed_artists.return_value = {
+            "artists": {"items": [make_artist("a1", ["dream pop"])]}
+        }
+        captured_genres: list[list[str]] = []
+
+        def fake_search(**kwargs):
+            captured_genres.append(kwargs.get("q", ""))
+            return {"tracks": {"items": []}}
+
+        mock_sp.search.side_effect = fake_search
+        mock_sp.artists.return_value = {"artists": []}
+        c._fetch_audio_features = lambda ids: []
+
+        c.ingest(tracks_per_genre=1)
+
+        # All three genres should have been used to search.
+        joined = " ".join(captured_genres)
+        for g in ("synthwave", "indie pop", "dream pop"):
+            assert g in joined
+
+
+# ------------------------------------------------------------------ #
+# Partition validation                                                 #
+# ------------------------------------------------------------------ #
+
+class TestPartitionValidation:
+    # Path separators in partition would let a future caller escape the bronze tree;
+    # the saver must reject them up-front.
+    @pytest.mark.parametrize("bad", ["../etc", "..", "a/b", "a\\b", ".hidden", ""])
+    def test_rejects_invalid_partition(self, client, bad):
+        c, _, _ = client
+        with pytest.raises(ValueError, match="partition"):
+            c._save_to_bronze([{"id": "x"}], "user_top_tracks", partition=bad)
+
+    # A normal time_range partition must continue to work.
+    def test_accepts_valid_partition(self, client):
+        c, _, _ = client
+        path = c._save_to_bronze([{"id": "x"}], "user_top_tracks", partition="short_term")
+        assert path is not None
+        assert "short_term" in path.parts
+
+
+# ------------------------------------------------------------------ #
+# Fallback genres single source of truth                               #
+# ------------------------------------------------------------------ #
+
+class TestFallbackGenresFromConfig:
+    # The fallback list must come solely from config; if config has none, the function
+    # returns an empty list rather than a stale hardcoded default.
+    def test_returns_empty_when_config_missing(self, monkeypatch):
+        from src.ingestion import spotify_client as m
+        monkeypatch.setattr(m, "_CONFIG", {})
+        assert m._fallback_genres() == []
+
+    def test_returns_config_value(self, monkeypatch):
+        from src.ingestion import spotify_client as m
+        monkeypatch.setattr(m, "_CONFIG", {"spotify": {"fallback_genres": ["techno"]}})
+        assert m._fallback_genres() == ["techno"]

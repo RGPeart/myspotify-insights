@@ -1069,12 +1069,12 @@ def fetch_daily_costs(subscription_id: str, resource_group: str, token: str) -> 
 
 ### Milestone 1: Foundation & Data Ingestion (Week 1)
 **Deliverables:**
-- [ ] GitHub repository set up with README
-- [ ] Azure account configured with resource group
-- [ ] Spotify API integration working
-- [ ] Azure Function that fetches track data to Blob Storage
+- [&check;] GitHub repository set up with README
+- [&check;] Azure account configured with resource group
+- [&check;] Spotify API integration working
+- [&check;] Azure Function that fetches track data to Blob Storage
 - [ ] Initial architecture diagram
-- [ ] `structlog` integrated as the logging standard across all modules
+- [&check;] `structlog` integrated as the logging standard across all modules
 - [ ] Azure Cost Management enabled on resource group
 
 **Success Criteria:** Can extract 100+ tracks with audio features and store as JSON in Azure; all log output is structured JSON via structlog.
@@ -1083,12 +1083,12 @@ def fetch_daily_costs(subscription_id: str, resource_group: str, token: str) -> 
 
 ### Milestone 2: ETL Pipeline & Data Models (Week 2)
 **Deliverables:**
-- [ ] Bronze → Silver transformation (Python/pandas)
-- [ ] Silver → Gold transformation migrated to dbt SQL models (dim_tracks, dim_artists, fact_listening_history)
-- [ ] dbt project initialised under `/dbt/` with DuckDB profile
-- [ ] dbt staging models reading from silver Parquet files
-- [ ] dbt schema tests: `unique`, `not_null`, `accepted_range` on all key columns
-- [ ] `dbt run && dbt test` wired into the Airflow DAG after `_bronze_to_silver`
+- [&check;] Bronze → Silver transformation (Python/pandas)
+- [&check;] Silver → Gold transformation migrated to dbt SQL models (dim_tracks, dim_artists, fact_listening_history)
+- [&check;] dbt project initialised under `/dbt/` with DuckDB profile
+- [&check;] dbt staging models reading from silver Parquet files
+- [&check;] dbt schema tests: `unique`, `not_null`, `accepted_range` on all key columns
+- [&check;] `dbt run && dbt test` wired into the Airflow DAG after `_bronze_to_silver`
 - [ ] `dbt docs generate` screenshot added to README lineage section
 - [ ] Pydantic models defined for all 5 datasets in `/src/models/`
 - [ ] JSON Schema files generated from Pydantic models in `/schemas/`
@@ -1124,7 +1124,7 @@ def fetch_daily_costs(subscription_id: str, resource_group: str, token: str) -> 
 ### Milestone 4: Dashboard, Schema Registry & Portfolio Polish (Week 4)
 **Deliverables:**
 - [ ] Interactive dashboard with 5+ core visualizations
-- [ ] Lineage graph panel in dashboard (via Marquez REST API)
+- [&check;] Lineage graph panel in dashboard (via Marquez REST API)
 - [ ] SLA compliance table (rolling 7-day) in dashboard
 - [ ] Cloud cost panel in dashboard (actual vs. estimated)
 - [ ] Active contracts summary table in dashboard
