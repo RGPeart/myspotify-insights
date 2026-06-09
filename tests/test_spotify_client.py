@@ -744,6 +744,7 @@ class TestIngestPersonalDataFlow:
         assert any(bronze.glob("user_top_tracks/short_term/**/*.json"))
         assert any(bronze.glob("user_top_tracks/medium_term/**/*.json"))
         assert any(bronze.glob("user_top_artists/short_term/**/*.json"))
+        assert any(bronze.glob("user_top_artists/medium_term/**/*.json"))
         assert any(bronze.glob("followed_artists/**/*.json"))
 
     # Top tracks must also flow into the standard `tracks` data type (and into the

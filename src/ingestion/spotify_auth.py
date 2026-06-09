@@ -30,9 +30,9 @@ _MISSING_TOKEN_MSG = (
 def build_oauth(open_browser: bool = False, cache_handler=None) -> SpotifyOAuth:
     """Construct a ``SpotifyOAuth`` configured with the project's scopes."""
     return SpotifyOAuth(
-        client_id=os.environ["SPOTIFY_CLIENT_ID"],
-        client_secret=os.environ["SPOTIFY_CLIENT_SECRET"],
-        redirect_uri=os.environ["SPOTIFY_REDIRECT_URI"],
+        client_id=os.environ.get("SPOTIFY_CLIENT_ID"),
+        client_secret=os.environ.get("SPOTIFY_CLIENT_SECRET"),
+        redirect_uri=os.environ.get("SPOTIFY_REDIRECT_URI"),
         scope=" ".join(SCOPES),
         open_browser=open_browser,
         cache_handler=cache_handler,

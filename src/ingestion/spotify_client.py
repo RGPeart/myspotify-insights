@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 import yaml
 from datetime import datetime, timezone
@@ -42,10 +43,10 @@ class SpotifyIngestionClient:
     MAX_RETRIES: int = _spotify_cfg.get("max_retries", 3)
     BACKOFF_BASE: float = _spotify_cfg.get("backoff_base_seconds", 1.0)
     MARKET: str = _spotify_cfg.get("market", "US")
-    TOP_TIME_RANGES: list[str] = _spotify_cfg.get("top_time_ranges", ["short_term", "medium_term"])
-    TOP_LIMIT: int = _spotify_cfg.get("top_limit", 50)
-    FOLLOWED_LIMIT: int = _spotify_cfg.get("followed_artists_limit", 50)
-    DERIVED_GENRES_MAX: int = _spotify_cfg.get("derived_genres_max", 10)
+    TOP_TIME_RANGES: tuple[str, ...] = _spotify_cfg.get("top_time_ranges", ("short_term", "medium_term"))
+    TOP_LIMIT: int = _spotify_cfg.get("top_limit", 100)
+    FOLLOWED_LIMIT: int = _spotify_cfg.get("followed_artists_limit", 100)
+    DERIVED_GENRES_MAX: int = _spotify_cfg.get("derived_genres_max", 20)
 
     def __init__(self, bronze_dir: Path = BRONZE_DIR) -> None:
         self.sp = get_authenticated_client()
@@ -383,10 +384,7 @@ class SpotifyIngestionClient:
         if not records:
             return None
         if partition is not None and (
-            not partition
-            or "/" in partition
-            or "\\" in partition
-            or partition.startswith(".")
+            not re.fullmatch(r'[a-zA-Z0-9_-]+', partition)
         ):
             raise ValueError(f"Invalid partition value: {partition!r}")
         now_utc = datetime.now(timezone.utc)
