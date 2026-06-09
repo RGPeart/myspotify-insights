@@ -2,7 +2,22 @@ spotify:
   market: US
   max_retries: 3
   backoff_base_seconds: 1.0
-  default_genres:
+  # Time ranges to pull from /me/top/{type}. Spotify supports short_term
+  # (~4 weeks), medium_term (~6 months), long_term (years).
+  # long_term is deliberately omitted: recent taste is the signal for the
+  # recommender; lifetime averages drown out personalisation. See
+  # docs/decisions/2026-06-08.md § 1.
+  top_time_ranges:
+    - short_term
+    - medium_term
+  top_limit: 50
+  followed_artists_limit: 50
+  # Cap on how many genres derived from the user's top/followed artists are
+  # used as seeds for the catalog-expansion search.
+  derived_genres_max: 10
+  # Used only when the authenticated user has no top/followed artists
+  # (e.g. brand-new Spotify account) so catalog expansion still runs.
+  fallback_genres:
     - pop
     - rock
     - hip-hop

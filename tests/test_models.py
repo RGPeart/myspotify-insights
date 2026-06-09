@@ -19,6 +19,7 @@ from src.models.predict import (
     _collab_scores,
     _content_scores,
     get_recommendations,
+    load_artifacts,
 )
 
 
@@ -389,6 +390,29 @@ class TestGetRecommendations:
         recs = get_recommendations("user_energetic", None, artifacts, n=3)
         for r in recs:
             assert round(r["score"], 4) == r["score"]
+
+
+# ------------------------------------------------------------------ #
+# load_artifacts                                                       #
+# ------------------------------------------------------------------ #
+
+class TestLoadArtifacts:
+    # A missing model file must raise FileNotFoundError so the API startup fails loudly
+    # with a clear "run train first" message rather than serving a broken model.
+    def test_raises_when_model_file_missing(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            load_artifacts(models_dir=tmp_path)
+
+    # When the .pkl exists, load_artifacts must unpickle and return its contents
+    # unchanged so the loaded artifacts match exactly what train.run() wrote to disk.
+    def test_loads_pickled_artifacts(self, tmp_path):
+        expected = {"content": {}, "collab": {}, "trained_at": "2026-06-09T00:00:00+00:00"}
+        with open(tmp_path / "recommendation_model.pkl", "wb") as f:
+            pickle.dump(expected, f)
+
+        loaded = load_artifacts(models_dir=tmp_path)
+
+        assert loaded == expected
 
 
 # ------------------------------------------------------------------ #
