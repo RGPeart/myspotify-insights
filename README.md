@@ -389,6 +389,36 @@ CI guards this: `tests/test_schemas.py` regenerates each schema from its model a
 fails if it differs from the committed file, so the JSON Schema can never silently
 drift from the Pydantic source of truth.
 
+## Data Contracts
+
+Each silver stage boundary has an explicit, versioned **data contract** — the formal
+interface the producer promises its consumers. Contracts live in
+[`src/contracts/`](src/contracts/) and build directly on the schema registry above.
+
+A `DataContract` bundles:
+- **`schema_model`** — the Pydantic contract from `src/schemas/` (per-row validation).
+- **`quality_rules`** — named cross-row checks (e.g. key uniqueness) the per-row schema can't express.
+- **`owner` / `producer` / `consumer`** — who owns it and which stages write/read it.
+- **`version`** and **`max_staleness_hours`** — for traceability and freshness budgeting.
+
+```
+src/contracts/
+├── base.py       # DataContract dataclass + ContractViolationError
+├── rules.py      # QUALITY_RULES registry (name → predicate)
+├── enforce.py    # enforce_contract(df, contract)
+└── registry.py   # silver_tracks / silver_audio_features / silver_artists
+```
+
+**Runtime enforcement:** `bronze_to_silver.run()` calls `enforce_contract(df, contract)`
+after the operational quality gate and before writing Parquet. It delegates per-row
+schema checks to the Feature 8 validator, then runs the contract's quality rules. A
+violation raises `ContractViolationError` and halts the pipeline, logging a versioned
+`contract_violation` event. An unknown rule name raises `ValueError` (a misconfiguration).
+
+The active contracts and their metadata are surfaced in the Streamlit dashboard's
+**Data Contracts** panel. Gold's interface is enforced by the dbt schema tests rather
+than a duplicate Python contract.
+
 ## Testing
 
 ```bash
@@ -415,7 +445,7 @@ pytest tests/test_etl.py::TestBronzeToSilverRun::test_run_end_to_end
 | Feature 6: Observability & Data Lineage | Done | `main` |
 | Feature 7: SQL Transformation Layer (dbt + DuckDB) | Done | `main` |
 | Feature 8: Schema Registry & Schema Evolution | Done | `feature/schema-registry` |
-| Feature 9: Data Contracts | Planned | — |
+| Feature 9: Data Contracts | Done | `feature/data-contracts` |
 | Feature 10: Idempotent DAGs & Backfill | Planned | — |
 | Feature 11: SLA Monitoring & Alerting | Planned | — |
 | Feature 12: Cloud Cost Monitoring | Planned | — |

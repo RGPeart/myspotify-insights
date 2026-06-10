@@ -6,6 +6,8 @@ import requests
 import plotly.express as px
 import os
 
+from src.contracts.registry import CONTRACT_REGISTRY
+
 # Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8001")
 
@@ -175,6 +177,33 @@ st.dataframe(pd.DataFrame(dq_data), use_container_width=True)
 
 st.write(f"Last Pipeline Run: N/A (Placeholder)")
 st.write(f"Data Freshness: 1 day (Placeholder)")
+
+st.markdown("---")
+
+# -----------------------------------------------------------------------------
+# Data Contracts
+# -----------------------------------------------------------------------------
+
+st.header("📜 Data Contracts")
+st.write(
+    "Versioned contracts each pipeline stage promises to its consumers. "
+    "Enforced at runtime via `enforce_contract()` in the bronze→silver ETL."
+)
+
+contracts_df = pd.DataFrame([
+    {
+        "Contract": c.name,
+        "Version": c.version,
+        "Owner": c.owner,
+        "Producer": c.producer,
+        "Consumer": c.consumer,
+        "Schema": c.schema_model.__name__,
+        "Max Staleness (h)": c.max_staleness_hours,
+        "Quality Rules": ", ".join(c.quality_rules),
+    }
+    for c in CONTRACT_REGISTRY.values()
+])
+st.dataframe(contracts_df, use_container_width=True)
 
 st.markdown("---")
 
